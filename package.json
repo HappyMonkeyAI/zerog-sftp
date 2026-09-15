@@ -10,6 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "start": "electron .",
+    "icon": "python scripts/generate-icon.py",
+    "dist:dir": "npm run build && npm run icon && electron-builder --win dir --x64 --publish never",
+    "dist:portable": "npm run build && npm run icon && electron-builder --win portable --x64 --publish never",
     "ci": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
@@ -17,12 +20,26 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
+  "author": "Stephen Phillips",
+  "build": {
+    "appId": "com.happymonkeyai.zerogsftp",
+    "productName": "ZeroG SFTP",
+    "asar": true,
+    "npmRebuild": false,
+    "files": ["dist/**/*", "package.json", "build/icon.ico"],
+    "win": {
+      "target": [{"target":"dir","arch":["x64"]},{"target":"portable","arch":["x64"]}],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    }
+  },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.6",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^3.2.7"
