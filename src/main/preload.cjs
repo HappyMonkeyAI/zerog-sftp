@@ -1,5 +1,24 @@
-import { contextBridge, ipcRenderer } from 'electron';
+const { contextBridge, ipcRenderer } = require('electron');
+
 contextBridge.exposeInMainWorld('sftp', {
-  listProfiles: () => ipcRenderer.invoke('profiles:list'), listLocal: (path?:string) => ipcRenderer.invoke('local:list',path), listRemote: (target:string,path?:string) => ipcRenderer.invoke('remote:list',target,path), answerPrompt: (answer:string) => ipcRenderer.invoke('sftp:answer',answer), cancel: () => ipcRenderer.invoke('sftp:cancel'), onPrompt: (callback:(prompt:{kind:string;message:string})=>void) => { const handler=(_:unknown,prompt:{kind:string;message:string})=>callback(prompt); ipcRenderer.on('sftp:prompt',handler); return () => ipcRenderer.removeListener('sftp:prompt',handler); }, onProgress: (callback:(progress:{operation:string;percent:number;detail:string}|null)=>void) => { const handler=(_:unknown,progress:{operation:string;percent:number;detail:string}|null)=>callback(progress); ipcRenderer.on('sftp:progress',handler); return () => ipcRenderer.removeListener('sftp:progress',handler); },
-  mkdir: (target:string,path:string) => ipcRenderer.invoke('remote:mkdir',target,path), rename: (target:string,from:string,to:string) => ipcRenderer.invoke('remote:rename',target,from,to), remove: (target:string,path:string,kind:string) => ipcRenderer.invoke('remote:remove',target,path,kind), upload: (target:string,localPath:string,remoteDir:string,kind:string) => ipcRenderer.invoke('remote:upload',target,localPath,remoteDir,kind), download: (target:string,remotePath:string,localDir:string,kind:string) => ipcRenderer.invoke('remote:download',target,remotePath,localDir,kind)
+  listProfiles: () => ipcRenderer.invoke('profiles:list'),
+  listLocal: (path) => ipcRenderer.invoke('local:list', path),
+  listRemote: (target, path) => ipcRenderer.invoke('remote:list', target, path),
+  answerPrompt: (answer) => ipcRenderer.invoke('sftp:answer', answer),
+  cancel: () => ipcRenderer.invoke('sftp:cancel'),
+  onPrompt: (callback) => {
+    const handler = (_event, prompt) => callback(prompt);
+    ipcRenderer.on('sftp:prompt', handler);
+    return () => ipcRenderer.removeListener('sftp:prompt', handler);
+  },
+  onProgress: (callback) => {
+    const handler = (_event, progress) => callback(progress);
+    ipcRenderer.on('sftp:progress', handler);
+    return () => ipcRenderer.removeListener('sftp:progress', handler);
+  },
+  mkdir: (target, path) => ipcRenderer.invoke('remote:mkdir', target, path),
+  rename: (target, from, to) => ipcRenderer.invoke('remote:rename', target, from, to),
+  remove: (target, path, kind) => ipcRenderer.invoke('remote:remove', target, path, kind),
+  upload: (target, localPath, remoteDir, kind) => ipcRenderer.invoke('remote:upload', target, localPath, remoteDir, kind),
+  download: (target, remotePath, localDir, kind) => ipcRenderer.invoke('remote:download', target, remotePath, localDir, kind),
 });
