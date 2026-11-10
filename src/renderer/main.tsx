@@ -37,21 +37,47 @@ const thumbCache = new Map<string, string | null>();
 // Each remote thumbnail costs a fresh SFTP session, so cap how many run at once.
 const THUMB_CONCURRENCY = 3;
 let activeThumbLoads = 0;
-const thumbQueue: Array<() => void> = [];
+interface ThumbWaiter { scope: string; epoch: number; resolve: (granted: boolean) => void }
+const thumbQueue: ThumbWaiter[] = [];
+// A scope identifies the directory a thumbnail belongs to. Bumping its epoch when
+// the pane leaves that directory abandons queued and in-flight fetches for it.
+const thumbEpochs = new Map<string, number>();
 
-function acquireThumbSlot(): Promise<void> {
+function thumbScopeKey(isLocal: boolean, target: string, path: string): string {
+  return isLocal ? `local:${path}` : `remote:${target}:${path}`;
+}
+
+function thumbEpoch(scope: string): number { return thumbEpochs.get(scope) ?? 0; }
+
+function acquireThumbSlot(scope: string, epoch: number): Promise<boolean> {
+  if (epoch !== thumbEpoch(scope)) return Promise.resolve(false);
   if (activeThumbLoads < THUMB_CONCURRENCY) {
     activeThumbLoads += 1;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
-  return new Promise(resolve => {
-    thumbQueue.push(() => { activeThumbLoads += 1; resolve(); });
-  });
+  return new Promise(resolve => { thumbQueue.push({ scope, epoch, resolve }); });
 }
 
 function releaseThumbSlot(): void {
   activeThumbLoads = Math.max(0, activeThumbLoads - 1);
-  thumbQueue.shift()?.();
+  while (thumbQueue.length) {
+    const waiter = thumbQueue.shift() as ThumbWaiter;
+    if (waiter.epoch !== thumbEpoch(waiter.scope)) { waiter.resolve(false); continue; }
+    activeThumbLoads += 1;
+    waiter.resolve(true);
+    return;
+  }
+}
+
+function cancelThumbScope(scope: string): void {
+  thumbEpochs.set(scope, thumbEpoch(scope) + 1);
+  for (let i = thumbQueue.length - 1; i >= 0; i -= 1) {
+    const waiter = thumbQueue[i];
+    if (waiter.scope !== scope) continue;
+    thumbQueue.splice(i, 1);
+    waiter.resolve(false);
+  }
+  void window.sftp?.cancelThumbnails?.(scope);
 }
 
 function listingChildPath(base: string, name: string): string {
@@ -65,10 +91,11 @@ function EntryThumbnail(props: {
   isLocal: boolean;
   target?: string;
   cacheDir: string;
+  scope: string;
   edge: number;
   fallbackIcon: string;
 }) {
-  const { entry, path, isLocal, target, cacheDir, edge } = props;
+  const { entry, path, isLocal, target, cacheDir, scope, edge } = props;
   const eligible = isThumbnailCandidate(entry.name, entry.size, entry.kind);
   const fullPath = listingChildPath(path, entry.name);
   const cacheKey = isLocal ? `local:${fullPath}` : `${target || 'remote'}:${fullPath}`;
@@ -84,8 +111,9 @@ function EntryThumbnail(props: {
       return;
     }
     let cancelled = false;
+    const epoch = thumbEpoch(scope);
     const load = async (): Promise<string | null> => {
-      await acquireThumbSlot();
+      if (!(await acquireThumbSlot(scope, epoch))) return null;
       try {
         const api = window.sftp;
         if (isLocal) {
@@ -93,7 +121,7 @@ function EntryThumbnail(props: {
           return (await api.localThumbnail(fullPath))?.dataUrl ?? null;
         }
         if (typeof api.downloadThumbnail !== 'function') return null;
-        return (await api.downloadThumbnail(target || '', fullPath, cacheDir))?.dataUrl ?? null;
+        return (await api.downloadThumbnail(target || '', fullPath, cacheDir, scope))?.dataUrl ?? null;
       } catch {
         return null;
       } finally {
@@ -101,13 +129,16 @@ function EntryThumbnail(props: {
       }
     };
     void load().then((next) => {
-      thumbCache.set(cacheKey, next);
-      if (cancelled) return;
+      // An abandoned fetch reports null because its SFTP session was killed, so
+      // never remember that as a permanent failure for this file.
+      const abandoned = cancelled || epoch !== thumbEpoch(scope);
+      if (next !== null || !abandoned) thumbCache.set(cacheKey, next);
+      if (abandoned) return;
       setSrc(next);
       setFailed(next === null);
     });
     return () => { cancelled = true; };
-  }, [eligible, failed, isLocal, cacheKey, target, fullPath, cacheDir]);
+  }, [eligible, failed, isLocal, cacheKey, target, fullPath, cacheDir, scope]);
 
   if (src) {
     return <img className="tile-thumb" src={src} alt="" width={edge} height={edge} draggable={false} />;
@@ -300,6 +331,13 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
 }) {
   const [sort, setSort] = useState<{ key: 'name' | 'modified'; direction: 1 | -1 }>({ key: 'name', direction: 1 });
   const [anchor, setAnchor] = useState('');
+  // Leaving a directory abandons its thumbnails so they stop downloading in the background.
+  useEffect(() => {
+    const path = listing?.path ?? '';
+    if (!path) return;
+    const scope = thumbScopeKey(true, '', path);
+    return () => cancelThumbScope(scope);
+  }, [listing?.path]);
   const zoomRef = useCtrlWheelZoom(viewScale, onViewScaleChange, viewMode !== 'details');
   const iconEdge = Math.round(32 * viewScale);
   const thumbEdge = Math.round(48 * viewScale);
@@ -418,7 +456,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
           {entries?.map(e => (
             <div key={e.name} className="flex flex-col items-center p-2 rounded hover:bg-app-rowHover cursor-pointer group" onClick={(ev) => select(e, ev as any)} onDoubleClick={() => onNavigate(e)}>
               {isThumbnailCandidate(e.name, e.size, e.kind) ? (
-                <EntryThumbnail entry={e} path={listing?.path || ''} isLocal={true} cacheDir=".thumb-cache-local" edge={thumbEdge} fallbackIcon="file" />
+                <EntryThumbnail entry={e} path={listing?.path || ''} isLocal={true} cacheDir=".thumb-cache-local" scope={thumbScopeKey(true, '', listing?.path || '')} edge={thumbEdge} fallbackIcon="file" />
               ) : e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
@@ -449,6 +487,13 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
 }) {
   const [sort, setSort] = useState<{ key: 'name' | 'modified'; direction: 1 | -1 }>({ key: 'name', direction: 1 });
   const [anchor, setAnchor] = useState('');
+  // Leaving a directory abandons its thumbnails so they stop downloading in the background.
+  useEffect(() => {
+    const path = listing?.path ?? '';
+    if (!path) return;
+    const scope = thumbScopeKey(false, target, path);
+    return () => cancelThumbScope(scope);
+  }, [listing?.path, target]);
   const zoomRef = useCtrlWheelZoom(viewScale, onViewScaleChange, viewMode !== 'details');
   const iconEdge = Math.round(32 * viewScale);
   const thumbEdge = Math.round(48 * viewScale);
@@ -567,7 +612,7 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
           {entries?.map(e => (
             <div key={e.name} className="flex flex-col items-center p-2 rounded hover:bg-app-rowHover cursor-pointer group" onClick={(ev) => select(e, ev as any)} onDoubleClick={() => onNavigate(e)}>
               {isThumbnailCandidate(e.name, e.size, e.kind) ? (
-                <EntryThumbnail entry={e} path={listing?.path || ''} isLocal={false} target={target} cacheDir=".thumb-cache-remote" edge={thumbEdge} fallbackIcon="file" />
+                <EntryThumbnail entry={e} path={listing?.path || ''} isLocal={false} target={target} cacheDir=".thumb-cache-remote" scope={thumbScopeKey(false, target, listing?.path || '')} edge={thumbEdge} fallbackIcon="file" />
               ) : e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
