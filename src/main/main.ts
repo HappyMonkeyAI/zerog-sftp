@@ -13,16 +13,32 @@ let mainWindow: BrowserWindow | undefined; let activePty: any; let activePromptK
 // Thumbnail fetches are background work: remembering their scope lets a pane that
 // navigates away kill the SFTP sessions it no longer needs.
 const thumbSessions = new Map<string, Set<any>>();
-type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string}; type Listing={path:string;entries:Entry[]};
+type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string;mode?:string}; type Listing={path:string;entries:Entry[]};
 const unsafePath=/[\0\r\n"'\\*?[\]]/;
 function safePath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||unsafePath.test(path))throw new Error(`${label} contains unsupported characters.`);return path;}
 function safeLocalPath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||/[\0\r\n"'*?[\]]/.test(path))throw new Error(`${label} contains unsupported characters.`);return path.replaceAll('\\','/');}
 function quote(path:unknown,label:string):string{return `"${safePath(path,label)}"`;} function quoteLocal(path:unknown,label:string):string{return `"${safeLocalPath(path,label)}"`;}
 async function profiles():Promise<SshProfile[]>{try{return parseSshConfig(await readFile(join(homedir(),'.ssh','config'),'utf8'));}catch{return[];}}
-async function localList(path?:string):Promise<Listing>{const directory=path||homedir();const names=await readdir(directory,{withFileTypes:true});const entries=await Promise.all(names.map(async item=>{const full=join(directory,item.name);const stat=await import('node:fs/promises').then(fs=>fs.stat(full));return{name:item.name,kind:item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file',size:stat.size,modified:stat.mtime.toISOString()}as Entry;}));return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};}
+async function localList(path?:string):Promise<Listing>{
+  const directory=path||homedir();
+  const names=await readdir(directory,{withFileTypes:true});
+  // Stat each entry independently. Windows roots contain protected files (hiberfil.sys,
+  // pagefile.sys, DumpStack.log.tmp) that throw EPERM; one failure must not blank the pane.
+  const entries=await Promise.all(names.map(async item=>{
+    const kind:Kind=item.isSymbolicLink()?'symlink':item.isDirectory()?'directory':'file';
+    try{
+      const info=await stat(join(directory,item.name));
+      return{name:item.name,kind,size:info.size,modified:info.mtime.toISOString()}as Entry;
+    }catch{
+      return{name:item.name,kind,size:0}as Entry;
+    }
+  }));
+  return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};
+}
 function sftpExecutable():string { if(process.platform!=='win32')return 'sftp'; const candidates=[join(process.env.SystemRoot??'C:\\Windows','System32','OpenSSH','sftp.exe'),join(process.env.ProgramFiles??'C:\\Program Files','OpenSSH','sftp.exe')]; return candidates.find(existsSync)||'sftp.exe'; }
-// Only pass what OpenSSH needs. Forwarding process.env would leak shell/CI secrets into the PTY child.
-const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','lang','lc_all','lc_ctype']);
+// Only pass what OpenSSH/Windows need. Forwarding process.env would leak shell/CI secrets into the PTY child.
+// PROGRAMDATA is required on Windows OpenSSH; without it the child exits with only PTY mode noise.
+const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','systemdrive','comspec','os','temp','tmp','appdata','localappdata','programdata','lang','lc_all','lc_ctype']);
 function sftpEnv():Record<string,string>{
   const env:Record<string,string>={};
   for(const [key,value] of Object.entries(process.env)){
@@ -30,6 +46,13 @@ function sftpEnv():Record<string,string>{
   }
   if(!Object.keys(env).some(key=>key.toLowerCase()==='term'))env.TERM='xterm-256color';
   return env;
+}
+function stripAnsi(text:string):string{
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g,'').replace(/\x1b./g,'');
+}
+function sftpFailureMessage(out:string,exitCode:number):string{
+  const lines=stripAnsi(out).replace(/\r/g,'\n').split('\n').map(line=>line.trim()).filter(Boolean);
+  return lines.at(-1)||`sftp exited with code ${exitCode}`;
 }
 function runSftp(target:string,commands:string[],operation='',scope=''):Promise<string>{
   const destination=validateTarget(target);
@@ -66,7 +89,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
       if(activePty===child){activePty=undefined;activeOperation='';activePromptKind=undefined;}
       mainWindow?.webContents.send('sftp:progress',null);
       if(exitCode===0)finish(resolve,out);
-      else finish(reject,new Error(out.trim().split('\n').filter(Boolean).slice(-1)[0]||`sftp exited with code ${exitCode}`));
+      else finish(reject,new Error(sftpFailureMessage(out,exitCode)));
     });
     timeout=setTimeout(()=>{
       if(activePty===child){child.kill();activePty=undefined;}
@@ -74,7 +97,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
     },30000);
   });
 }
-function parseListing(stdout:string,fallback:string):Listing{const lines=stdout.replaceAll('\r','').split('\n');const pwd=lines.find(line=>line.startsWith('Remote working directory:'));const entries=lines.flatMap(line=>{const m=line.trimEnd().match(/^([dl-][^\s]*)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(.{3}\s+\d{1,2}\s+(?:\d{4}|\d{1,2}:\d{2}))\s+(.+)$/);if(!m)return[];return[{name:m[4].replace(/\s+->.*$/,''),kind:m[1].startsWith('d')?'directory':m[1].startsWith('l')?'symlink':'file',size:Number(m[2]),modified:m[3]}as Entry];}).filter(entry=>entry.name!=='.'&&entry.name!=='..');return{path:pwd?.replace('Remote working directory:','').trim()||fallback,entries};}
+function parseListing(stdout:string,fallback:string):Listing{const lines=stdout.replaceAll('\r','').split('\n');const pwd=lines.find(line=>line.startsWith('Remote working directory:'));const entries=lines.flatMap(line=>{const m=line.trimEnd().match(/^([dl-][^\s]*)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(.{3}\s+\d{1,2}\s+(?:\d{4}|\d{1,2}:\d{2}))\s+(.+)$/);if(!m)return[];return[{name:m[4].replace(/\s+->.*$/,''),kind:m[1].startsWith('d')?'directory':m[1].startsWith('l')?'symlink':'file',size:Number(m[2]),modified:m[3],mode:m[1]}as Entry];}).filter(entry=>entry.name!=='.'&&entry.name!=='..');return{path:pwd?.replace('Remote working directory:','').trim()||fallback,entries};}
 async function remoteList(target:string,path?:string):Promise<Listing>{const commands=[];if(path)commands.push(`cd ${quote(path,'Remote path')}`);commands.push('ls -lan','pwd');return parseListing(await runSftp(target,commands),path||'~');}
 async function remoteMutation(target:string,command:string){await runSftp(target,[command]);} async function upload(target:string,localPath:string,remoteDir:string,kind:Kind){await runSftp(target,[`put${kind==='directory'?' -r':''} ${quoteLocal(localPath,'Local path')} ${quote(remoteDir,'Remote path')}`],'upload');} async function download(target:string,remotePath:string,localDir:string,kind:Kind){await runSftp(target,[`get${kind==='directory'?' -r':''} ${quote(remotePath,'Remote path')} ${quoteLocal(localDir,'Local path')}`],'download');}
 const THUMB_EXTENSIONS = new Set(['jpg','jpeg','png','gif','webp','bmp','ico']);
