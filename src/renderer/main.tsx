@@ -121,6 +121,57 @@ function EntryThumbnail(props: {
 
 const isHidden = (name: string) => name.startsWith('.');
 
+function ViewModeToggle({ mode, onChange }: { mode: ListingViewMode; onChange: (mode: ListingViewMode) => void }) {
+  const options: Array<{ mode: ListingViewMode; label: string; icon: React.ReactNode }> = [
+    {
+      mode: 'details',
+      label: 'Details',
+      icon: (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path>
+        </svg>
+      ),
+    },
+    {
+      mode: 'icons',
+      label: 'Icons',
+      icon: (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path d="M5.5 4h3A1.5 1.5 0 0110 5.5v3A1.5 1.5 0 018.5 10h-3A1.5 1.5 0 014 8.5v-3A1.5 1.5 0 015.5 4zM15.5 4h3A1.5 1.5 0 0120 5.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 0114 8.5v-3A1.5 1.5 0 0115.5 4zM5.5 14h3A1.5 1.5 0 0110 15.5v3A1.5 1.5 0 018.5 20h-3A1.5 1.5 0 014 18.5v-3A1.5 1.5 0 015.5 14zM15.5 14h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3a1.5 1.5 0 01-1.5-1.5v-3a1.5 1.5 0 011.5-1.5z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path>
+        </svg>
+      ),
+    },
+    {
+      mode: 'thumbnails',
+      label: 'Thumbnails',
+      icon: (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="1.5" strokeLinejoin="round" strokeWidth="2"></rect>
+          <path d="M4.5 16.5l4.4-4.4a1 1 0 011.4 0l3.9 3.9m0 0l1.5-1.5a1 1 0 011.4 0l2.4 2.4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path>
+          <circle cx="9.25" cy="9.25" r="1.25" strokeWidth="2"></circle>
+        </svg>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      {options.map(option => (
+        <button
+          key={option.mode}
+          className={`p-1 rounded ${mode === option.mode ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+          title={option.label}
+          aria-label={option.label}
+          aria-pressed={mode === option.mode}
+          onClick={() => onChange(option.mode)}
+        >
+          {option.icon}
+        </button>
+      ))}
+    </>
+  );
+}
+
 function FileRowLocal({ entry, selected, onSelect, onNavigate, showHidden, viewMode, viewScale }: {
   entry: FileEntry;
   selected: FileEntry[];
@@ -839,10 +890,8 @@ function App() {
             </button>
             <div className="h-4 w-[1px] bg-slate-800 mx-1"></div>
             <div className="flex items-center space-x-1 bg-app-card border border-app-border rounded px-2 py-1">
-              <span className="text-slate-400 text-[10px]">View:</span>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${localViewMode === 'details' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setLocalViewMode('details')}>Details</button>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${localViewMode === 'icons' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setLocalViewMode('icons')}>Icons</button>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${localViewMode === 'thumbnails' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setLocalViewMode('thumbnails')}>Thumbnails</button>
+              <span className="text-slate-400 text-[10px]">Local:</span>
+              <ViewModeToggle mode={localViewMode} onChange={setLocalViewMode} />
               {localViewMode !== 'details' && (
                 <>
                   <div className="h-3 w-[1px] bg-slate-700 mx-0.5"></div>
@@ -854,9 +903,7 @@ function App() {
             </div>
             <div className="flex items-center space-x-1 bg-app-card border border-app-border rounded px-2 py-1 ml-2">
               <span className="text-slate-400 text-[10px]">Remote:</span>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${remoteViewMode === 'details' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setRemoteViewMode('details')}>Details</button>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${remoteViewMode === 'icons' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setRemoteViewMode('icons')}>Icons</button>
-              <button className={`px-1.5 py-0.5 text-[10px] rounded ${remoteViewMode === 'thumbnails' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`} onClick={() => setRemoteViewMode('thumbnails')}>Thumbnails</button>
+              <ViewModeToggle mode={remoteViewMode} onChange={setRemoteViewMode} />
               {remoteViewMode !== 'details' && (
                 <>
                   <div className="h-3 w-[1px] bg-slate-700 mx-0.5"></div>
