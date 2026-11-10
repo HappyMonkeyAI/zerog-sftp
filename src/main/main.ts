@@ -19,7 +19,22 @@ function safePath(path:unknown,label:string):string{if(typeof path!=='string'||!
 function safeLocalPath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||/[\0\r\n"'*?[\]]/.test(path))throw new Error(`${label} contains unsupported characters.`);return path.replaceAll('\\','/');}
 function quote(path:unknown,label:string):string{return `"${safePath(path,label)}"`;} function quoteLocal(path:unknown,label:string):string{return `"${safeLocalPath(path,label)}"`;}
 async function profiles():Promise<SshProfile[]>{try{return parseSshConfig(await readFile(join(homedir(),'.ssh','config'),'utf8'));}catch{return[];}}
-async function localList(path?:string):Promise<Listing>{const directory=path||homedir();const names=await readdir(directory,{withFileTypes:true});const entries=await Promise.all(names.map(async item=>{const full=join(directory,item.name);const stat=await import('node:fs/promises').then(fs=>fs.stat(full));return{name:item.name,kind:item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file',size:stat.size,modified:stat.mtime.toISOString()}as Entry;}));return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};}
+async function localList(path?:string):Promise<Listing>{
+  const directory=path||homedir();
+  const names=await readdir(directory,{withFileTypes:true});
+  // Stat each entry independently. Windows roots contain protected files (hiberfil.sys,
+  // pagefile.sys, DumpStack.log.tmp) that throw EPERM; one failure must not blank the pane.
+  const entries=await Promise.all(names.map(async item=>{
+    const kind:Kind=item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file';
+    try{
+      const info=await stat(join(directory,item.name));
+      return{name:item.name,kind,size:info.size,modified:info.mtime.toISOString()}as Entry;
+    }catch{
+      return{name:item.name,kind,size:0}as Entry;
+    }
+  }));
+  return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};
+}
 function sftpExecutable():string { if(process.platform!=='win32')return 'sftp'; const candidates=[join(process.env.SystemRoot??'C:\\Windows','System32','OpenSSH','sftp.exe'),join(process.env.ProgramFiles??'C:\\Program Files','OpenSSH','sftp.exe')]; return candidates.find(existsSync)||'sftp.exe'; }
 // Only pass what OpenSSH/Windows need. Forwarding process.env would leak shell/CI secrets into the PTY child.
 // PROGRAMDATA is required on Windows OpenSSH; without it the child exits with only PTY mode noise.
