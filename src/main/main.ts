@@ -21,10 +21,20 @@ function quote(path:unknown,label:string):string{return `"${safePath(path,label)
 async function profiles():Promise<SshProfile[]>{try{return parseSshConfig(await readFile(join(homedir(),'.ssh','config'),'utf8'));}catch{return[];}}
 async function localList(path?:string):Promise<Listing>{const directory=path||homedir();const names=await readdir(directory,{withFileTypes:true});const entries=await Promise.all(names.map(async item=>{const full=join(directory,item.name);const stat=await import('node:fs/promises').then(fs=>fs.stat(full));return{name:item.name,kind:item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file',size:stat.size,modified:stat.mtime.toISOString()}as Entry;}));return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};}
 function sftpExecutable():string { if(process.platform!=='win32')return 'sftp'; const candidates=[join(process.env.SystemRoot??'C:\\Windows','System32','OpenSSH','sftp.exe'),join(process.env.ProgramFiles??'C:\\Program Files','OpenSSH','sftp.exe')]; return candidates.find(existsSync)||'sftp.exe'; }
+// Only pass what OpenSSH needs. Forwarding process.env would leak shell/CI secrets into the PTY child.
+const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','lang','lc_all','lc_ctype']);
+function sftpEnv():Record<string,string>{
+  const env:Record<string,string>={};
+  for(const [key,value] of Object.entries(process.env)){
+    if(value!==undefined&&SFTP_ENV_ALLOW.has(key.toLowerCase()))env[key]=value;
+  }
+  if(!Object.keys(env).some(key=>key.toLowerCase()==='term'))env.TERM='xterm-256color';
+  return env;
+}
 function runSftp(target:string,commands:string[],operation='',scope=''):Promise<string>{
   const destination=validateTarget(target);
   return new Promise((resolve,reject)=>{
-    const child=pty.spawn(sftpExecutable(),['-o','ConnectTimeout=20',destination],{name:'xterm-256color',cols:512,rows:24,cwd:homedir(),env:process.env});
+    const child=pty.spawn(sftpExecutable(),['-o','ConnectTimeout=20',destination],{name:'xterm-256color',cols:512,rows:24,cwd:homedir(),env:sftpEnv()});
     activePty=child;activeOperation=operation;
     if(scope){let tracked=thumbSessions.get(scope);if(!tracked){tracked=new Set();thumbSessions.set(scope,tracked);}tracked.add(child);child.__thumbScope=scope;}
     // Keep command/prompt state per session so concurrent SFTP runs cannot cross-wire.

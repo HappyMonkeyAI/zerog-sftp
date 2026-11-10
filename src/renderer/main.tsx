@@ -400,7 +400,6 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
           <button className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors" title="Go up to parent folder" onClick={onUp} disabled={!canGoUp}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
           </button>
-          <span className="text-[11px] text-slate-400 font-mono hidden xl:inline">142.8 GB free</span>
         </div>
       </div>
       {viewMode === 'details' && (
@@ -1022,7 +1021,7 @@ function App() {
             <div className="flex items-center space-x-3 font-mono text-[10px]">
               <span className="text-slate-500">UTF-8</span>
               <span className="text-slate-600">|</span>
-              <span className="text-slate-400">OpenSSH Agent Active</span>
+              <span className="text-slate-400">OpenSSH</span>
             </div>
           </footer>
         </section>
