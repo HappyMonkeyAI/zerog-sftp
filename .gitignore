@@ -21,3 +21,6 @@ out/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Agent local state
+.agent/
