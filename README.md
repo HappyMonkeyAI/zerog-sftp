@@ -1,34 +1,96 @@
 # ZeroG SFTP
 
-Standalone SFTP file transfer client for Windows and OpenSSH.
+A standalone, two-pane SFTP client for Windows.
 
-The first slice discovers connection aliases from `~/.ssh/config`, accepts manual SSH targets, lists remote directories using the system `sftp` client, and supports upload/download plus remote create, rename, and delete operations. Transfers expose PTY-derived progress and can be cancelled. SSH configuration, agents, identity files, and `known_hosts` remain owned by OpenSSH. Password/passphrase and host-key prompts are shown in-app and are never stored.
+ZeroG SFTP drives the OpenSSH `sftp` client you already have installed, so your
+existing `~/.ssh/config`, `ssh-agent`, identity files, and `known_hosts` keep
+working exactly as they do from the terminal. There is no separate credential
+store: passwords, passphrases, and host-key confirmations are asked for in the
+app and never persisted.
 
-File navigation and selection:
+## Features
 
-- Double-click a directory to open it.
-- Use the `..` row or the up-arrow beside the current path to go to the parent directory. The control is disabled at the filesystem/remote root.
-- Click an item to select it; Shift-click another item to select the complete range between them.
-- Upload and download operate on the selected items as a sequential queue. The progress display shows the current item and queue position.
-- Selecting a folder and transferring it copies the whole tree — every subfolder and file — recursively. The connect timeout is cleared once the session is interactive, so long folder transfers are not interrupted mid-run.
-- Name sorting keeps directories together: ascending puts directories first, descending puts them last. Items within each group are alphabetically sorted. Date sorting is chronological and uses the name as a tie-breaker.
-- Hidden files (entries whose name starts with a dot) are hidden by default in both panes. Tick **Show hidden** in the toolbar to reveal them on both sides at once. When a folder contains only hidden entries, the pane shows "Nothing here but hidden files."
+- **Profile discovery** from `~/.ssh/config`, plus manual `user@host` targets.
+- **Two-pane explorer** with Details, Icons, and Thumbnails views. `Ctrl` +
+  mouse wheel zooms the icon and thumbnail views.
+- **Image thumbnails** for remote files, fetched over SFTP and cached on disk.
+- **Transfers** as a sequential queue with per-item progress, queue position,
+  and cancellation. Folders transfer recursively.
+- **Remote file operations**: create directory, rename, delete.
+- **Selection and sorting**: click to select, `Shift`-click for a range, sort by
+  name or date with directories grouped together.
+- **Hidden files** are hidden by default; a toolbar toggle reveals them in both
+  panes at once.
 
+## Requirements
 
-## Development
+- Windows 10 (1809 or later) or Windows 11.
+- The OpenSSH client. Windows ships `sftp.exe` at
+  `%SystemRoot%\System32\OpenSSH\sftp.exe`. If it is missing, install the
+  "OpenSSH Client" optional feature.
+- Node.js 20 or later for development.
+
+## Getting started
 
 ```text
 npm install
-npm run ci
+npm run build
 npm start
 ```
 
-## Windows packaging
+`npm run ci` runs the full verification used by continuous integration:
+typecheck, tests, then a production build.
+
+## Packaging
 
 ```text
 npm run dist:dir
 npm run dist:portable
 ```
 
-The current host can produce the unpacked and portable artifacts, but `node-pty` requires an Electron-native rebuild for the packaged app. The package configuration currently disables electron-builder’s automatic rebuild because this host is missing Visual Studio Spectre-mitigated libraries (`MSB8040`). Treat the generated artifacts as structural packaging evidence only until `node-pty` is rebuilt and a packaged transfer is exercised.
+`node-pty` is a native module and must be rebuilt against Electron's ABI for a
+packaged build to work. Automatic rebuild is currently disabled in the
+`electron-builder` configuration because it requires Visual Studio's
+Spectre-mitigated libraries (`MSB8040`). Treat the generated artifacts as
+structural packaging output until `node-pty` is rebuilt and a packaged transfer
+has been exercised end to end.
 
+## How it works
+
+- The Electron main process spawns the system `sftp` binary through `node-pty`
+  and writes commands once the `sftp>` prompt appears. Progress percentages are
+  parsed from the PTY stream.
+- The renderer is sandboxed: `contextIsolation` on, `nodeIntegration` off, a
+  narrow preload bridge, and a restrictive Content Security Policy. Filesystem
+  and network access only happen in the main process.
+- Paths are validated in the main process before they reach the shell, rejecting
+  quotes, glob characters, and control characters.
+
+## Project layout
+
+```text
+src/main/       Electron main process and the preload bridge
+src/renderer/   React UI
+src/shared/     SSH config parsing and the IPC contract
+tests/          Vitest suites
+scripts/        Build helpers
+```
+
+## Limitations
+
+- Packaging targets are Windows only, and the `sftp` executable discovery is
+  Windows-specific.
+- Transfers run one item at a time. Mutations are not queued.
+- No built-in key management; use `ssh-agent` and your SSH config.
+
+## Contributing
+
+Issues and pull requests are welcome. Run `npm run ci` before opening a pull
+request, and keep the preload bridge, the main-process handlers, and
+`src/shared/types.d.ts` in sync — a test enforces that parity.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Copyright (c) 2026 Stephen Phillips and HappyMonkeyAI.

@@ -1,5 +1,26 @@
 node_modules/
 dist/
-*.log
-.env
+release/
+out/
+
+# Local tooling state
 .ijfw/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and build caches
+*.log
+*.tsbuildinfo
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Agent local state
+.agent/

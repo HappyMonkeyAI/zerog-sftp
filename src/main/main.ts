@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
-import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile, stat, rename as renameFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,9 @@ import { parseSshConfig, validateTarget, type SshProfile } from '../shared/ssh.j
 const require=createRequire(import.meta.url); const pty=require('node-pty');
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 let mainWindow: BrowserWindow | undefined; let activePty: any; let activePromptKind: string | undefined; let activeOperation = '';
+// Thumbnail fetches are background work: remembering their scope lets a pane that
+// navigates away kill the SFTP sessions it no longer needs.
+const thumbSessions = new Map<string, Set<any>>();
 type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string}; type Listing={path:string;entries:Entry[]};
 const unsafePath=/[\0\r\n"'\\*?[\]]/;
 function safePath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||unsafePath.test(path))throw new Error(`${label} contains unsupported characters.`);return path;}
@@ -18,15 +21,30 @@ function quote(path:unknown,label:string):string{return `"${safePath(path,label)
 async function profiles():Promise<SshProfile[]>{try{return parseSshConfig(await readFile(join(homedir(),'.ssh','config'),'utf8'));}catch{return[];}}
 async function localList(path?:string):Promise<Listing>{const directory=path||homedir();const names=await readdir(directory,{withFileTypes:true});const entries=await Promise.all(names.map(async item=>{const full=join(directory,item.name);const stat=await import('node:fs/promises').then(fs=>fs.stat(full));return{name:item.name,kind:item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file',size:stat.size,modified:stat.mtime.toISOString()}as Entry;}));return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};}
 function sftpExecutable():string { if(process.platform!=='win32')return 'sftp'; const candidates=[join(process.env.SystemRoot??'C:\\Windows','System32','OpenSSH','sftp.exe'),join(process.env.ProgramFiles??'C:\\Program Files','OpenSSH','sftp.exe')]; return candidates.find(existsSync)||'sftp.exe'; }
-function runSftp(target:string,commands:string[],operation=''):Promise<string>{
+// Only pass what OpenSSH needs. Forwarding process.env would leak shell/CI secrets into the PTY child.
+const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','lang','lc_all','lc_ctype']);
+function sftpEnv():Record<string,string>{
+  const env:Record<string,string>={};
+  for(const [key,value] of Object.entries(process.env)){
+    if(value!==undefined&&SFTP_ENV_ALLOW.has(key.toLowerCase()))env[key]=value;
+  }
+  if(!Object.keys(env).some(key=>key.toLowerCase()==='term'))env.TERM='xterm-256color';
+  return env;
+}
+function runSftp(target:string,commands:string[],operation='',scope=''):Promise<string>{
   const destination=validateTarget(target);
   return new Promise((resolve,reject)=>{
-    const child=pty.spawn(sftpExecutable(),['-o','ConnectTimeout=20',destination],{name:'xterm-256color',cols:512,rows:24,cwd:homedir(),env:process.env});
+    const child=pty.spawn(sftpExecutable(),['-o','ConnectTimeout=20',destination],{name:'xterm-256color',cols:512,rows:24,cwd:homedir(),env:sftpEnv()});
     activePty=child;activeOperation=operation;
+    if(scope){let tracked=thumbSessions.get(scope);if(!tracked){tracked=new Set();thumbSessions.set(scope,tracked);}tracked.add(child);child.__thumbScope=scope;}
     // Keep command/prompt state per session so concurrent SFTP runs cannot cross-wire.
     let out='';let settled=false;let commandsSent=false;let timeout:ReturnType<typeof setTimeout>|undefined;
     const finish=(fn:(value:any)=>void,value:any)=>{if(settled)return;settled=true;clearTimeout(timeout);fn(value);};
-    const sendCommands=()=>{if(commandsSent)return;commandsSent=true;clearTimeout(timeout);child.write(`${commands.join('\r')}\rbye\r`);};
+    const sendCommands=()=>{if(commandsSent)return;commandsSent=true;clearTimeout(timeout);
+      // Thumbnails are small, so bound them. Otherwise a killed PTY that never emits
+      // exit would leave the renderer's concurrency slot occupied forever.
+      if(operation==='thumbnail')timeout=setTimeout(()=>{try{child.kill();}catch{/* already gone */}finish(reject,new Error('Thumbnail fetch timed out.'));},60000);
+      child.write(`${commands.join('\r')}\rbye\r`);};
     const onData=(chunk:string)=>{
       out+=chunk;
       const clean=chunk.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
@@ -44,6 +62,7 @@ function runSftp(target:string,commands:string[],operation=''):Promise<string>{
     };
     child.onData(onData);
     child.onExit(({exitCode}:{exitCode:number})=>{
+      if(child.__thumbScope){const tracked=thumbSessions.get(child.__thumbScope);tracked?.delete(child);if(tracked&&tracked.size===0)thumbSessions.delete(child.__thumbScope);}
       if(activePty===child){activePty=undefined;activeOperation='';activePromptKind=undefined;}
       mainWindow?.webContents.send('sftp:progress',null);
       if(exitCode===0)finish(resolve,out);
@@ -77,7 +96,7 @@ async function localThumbnail(localPath: string): Promise<{dataUrl:string|null}>
     return await readThumbnailFile(file, file);
   } catch { return { dataUrl: null }; }
 }
-async function downloadThumbnail(target:string,remotePath:string,cacheDir:string):Promise<{dataUrl:string|null}>{
+async function downloadThumbnail(target:string,remotePath:string,cacheDir:string,scope=''):Promise<{dataUrl:string|null}>{
   try {
     const remote = safePath(remotePath, 'Remote path');
     const ext = fileExtension(remote);
@@ -89,7 +108,16 @@ async function downloadThumbnail(target:string,remotePath:string,cacheDir:string
     const slash = remote.lastIndexOf('/');
     const dir = slash > 0 ? remote.slice(0, slash) : (slash === 0 ? '/' : '.');
     const fileName = remote.slice(slash + 1);
-    await runSftp(target, [`cd ${quote(dir, 'Remote path')}`, `get ${quote(fileName, 'Remote path')} ${quoteLocal(cacheFile, 'Cache path')}`], 'thumbnail');
+    // Download beside the cache entry and promote it only once the transfer finishes,
+    // so a fetch aborted by navigation cannot leave a truncated file behind as a hit.
+    const partial = `${cacheFile}.part`;
+    try {
+      await runSftp(target, [`cd ${quote(dir, 'Remote path')}`, `get ${quote(fileName, 'Remote path')} ${quoteLocal(partial, 'Cache path')}`], 'thumbnail', scope);
+      await renameFile(partial, cacheFile);
+    } catch {
+      await rm(partial, { force: true }).catch(() => {});
+      return { dataUrl: null };
+    }
     return await readThumbnailFile(cacheFile, remote);
   } catch { return { dataUrl: null }; }
 }
@@ -97,5 +125,5 @@ function createWindow(){// Disable Electron's default File/Edit/View/etc. menu.
     Menu.setApplicationMenu(null);
     mainWindow=new BrowserWindow({width:1220,height:760,minWidth:900,minHeight:560,webPreferences:{preload:join(root,'dist','main','preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});void mainWindow.loadFile(join(root,'dist','renderer','index.html'));}
 ipcMain.handle('profiles:list',profiles);ipcMain.handle('local:list',(_e,path?:unknown)=>localList(typeof path==='string'?path:undefined));ipcMain.handle('remote:list',(_e,target:unknown,path?:unknown)=>remoteList(validateTarget(target),typeof path==='string'?path:undefined));ipcMain.handle('sftp:answer',(_e,answer:unknown)=>{if(typeof answer!=='string'||!activePty)throw new Error('No SFTP prompt is waiting.');activePty.write(answer.replace(/[\r\n]/g,'')+'\r');activePty.__promptKind=undefined;activePromptKind=undefined;});ipcMain.handle('sftp:cancel',()=>{if(!activePty)return false;activePty.kill();return true;});ipcMain.handle('remote:mkdir',(_e,target:unknown,path:unknown)=>remoteMutation(validateTarget(target),`mkdir ${quote(path,'Remote path')}`));ipcMain.handle('remote:rename',(_e,target:unknown,from:unknown,to:unknown)=>remoteMutation(validateTarget(target),`rename ${quote(from,'Remote path')} ${quote(to,'Remote path')}`));
-ipcMain.handle('remote:remove',(_e,target:unknown,path:unknown,kind:unknown)=>remoteMutation(validateTarget(target),`${kind==='directory'?'rmdir':'rm'} ${quote(path,'Remote path')}`));ipcMain.handle('remote:upload',(_e,target:unknown,localPath:unknown,remoteDir:unknown,kind:unknown)=>upload(validateTarget(target),safeLocalPath(localPath,'Local path'),safePath(remoteDir,'Remote path'),kind==='directory'?'directory':'file'));ipcMain.handle('remote:download',(_e,target:unknown,remotePath:unknown,localDir:unknown,kind:unknown)=>download(validateTarget(target),safePath(remotePath,'Remote path'),safeLocalPath(localDir,'Local path'),kind==='directory'?'directory':'file'));ipcMain.handle('sftp:downloadThumbnail',(_e,target:unknown,remotePath:unknown,cacheDir:unknown)=>downloadThumbnail(validateTarget(target),typeof remotePath==='string'?remotePath:'',typeof cacheDir==='string'?cacheDir:''));ipcMain.handle('local:thumbnail',(_e,localPath:unknown)=>localThumbnail(typeof localPath==='string'?localPath:''));
+ipcMain.handle('remote:remove',(_e,target:unknown,path:unknown,kind:unknown)=>remoteMutation(validateTarget(target),`${kind==='directory'?'rmdir':'rm'} ${quote(path,'Remote path')}`));ipcMain.handle('remote:upload',(_e,target:unknown,localPath:unknown,remoteDir:unknown,kind:unknown)=>upload(validateTarget(target),safeLocalPath(localPath,'Local path'),safePath(remoteDir,'Remote path'),kind==='directory'?'directory':'file'));ipcMain.handle('remote:download',(_e,target:unknown,remotePath:unknown,localDir:unknown,kind:unknown)=>download(validateTarget(target),safePath(remotePath,'Remote path'),safeLocalPath(localDir,'Local path'),kind==='directory'?'directory':'file'));ipcMain.handle('sftp:downloadThumbnail',(_e,target:unknown,remotePath:unknown,cacheDir:unknown,scope:unknown)=>downloadThumbnail(validateTarget(target),typeof remotePath==='string'?remotePath:'',typeof cacheDir==='string'?cacheDir:'',typeof scope==='string'?scope:''));ipcMain.handle('sftp:cancelThumbnails',(_e,scope:unknown)=>{if(typeof scope!=='string'||!scope||scope.length>4096)return false;const tracked=thumbSessions.get(scope);if(!tracked||tracked.size===0)return false;for(const child of tracked){try{child.kill();}catch{/* already gone */}}tracked.clear();return true;});ipcMain.handle('local:thumbnail',(_e,localPath:unknown)=>localThumbnail(typeof localPath==='string'?localPath:''));
 app.whenReady().then(createWindow);app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});
