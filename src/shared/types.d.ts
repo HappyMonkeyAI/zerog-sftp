@@ -1,4 +1,4 @@
-export type FileEntry = { name:string; kind:'file'|'directory'|'symlink'; size:number; modified?:string };
+export type FileEntry = { name:string; kind:'file'|'directory'|'symlink'; size:number; modified?:string; mode?:string };
 export type Listing = { path:string; entries:FileEntry[] };
 export type ListingViewMode = 'details' | 'icons' | 'thumbnails';
 export const LISTING_VIEW_MODES: ListingViewMode[] = ['details', 'icons', 'thumbnails'];

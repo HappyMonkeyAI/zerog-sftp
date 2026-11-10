@@ -13,7 +13,7 @@ let mainWindow: BrowserWindow | undefined; let activePty: any; let activePromptK
 // Thumbnail fetches are background work: remembering their scope lets a pane that
 // navigates away kill the SFTP sessions it no longer needs.
 const thumbSessions = new Map<string, Set<any>>();
-type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string}; type Listing={path:string;entries:Entry[]};
+type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string;mode?:string}; type Listing={path:string;entries:Entry[]};
 const unsafePath=/[\0\r\n"'\\*?[\]]/;
 function safePath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||unsafePath.test(path))throw new Error(`${label} contains unsupported characters.`);return path;}
 function safeLocalPath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||/[\0\r\n"'*?[\]]/.test(path))throw new Error(`${label} contains unsupported characters.`);return path.replaceAll('\\','/');}
@@ -25,7 +25,7 @@ async function localList(path?:string):Promise<Listing>{
   // Stat each entry independently. Windows roots contain protected files (hiberfil.sys,
   // pagefile.sys, DumpStack.log.tmp) that throw EPERM; one failure must not blank the pane.
   const entries=await Promise.all(names.map(async item=>{
-    const kind:Kind=item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file';
+    const kind:Kind=item.isSymbolicLink()?'symlink':item.isDirectory()?'directory':'file';
     try{
       const info=await stat(join(directory,item.name));
       return{name:item.name,kind,size:info.size,modified:info.mtime.toISOString()}as Entry;
@@ -97,7 +97,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
     },30000);
   });
 }
-function parseListing(stdout:string,fallback:string):Listing{const lines=stdout.replaceAll('\r','').split('\n');const pwd=lines.find(line=>line.startsWith('Remote working directory:'));const entries=lines.flatMap(line=>{const m=line.trimEnd().match(/^([dl-][^\s]*)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(.{3}\s+\d{1,2}\s+(?:\d{4}|\d{1,2}:\d{2}))\s+(.+)$/);if(!m)return[];return[{name:m[4].replace(/\s+->.*$/,''),kind:m[1].startsWith('d')?'directory':m[1].startsWith('l')?'symlink':'file',size:Number(m[2]),modified:m[3]}as Entry];}).filter(entry=>entry.name!=='.'&&entry.name!=='..');return{path:pwd?.replace('Remote working directory:','').trim()||fallback,entries};}
+function parseListing(stdout:string,fallback:string):Listing{const lines=stdout.replaceAll('\r','').split('\n');const pwd=lines.find(line=>line.startsWith('Remote working directory:'));const entries=lines.flatMap(line=>{const m=line.trimEnd().match(/^([dl-][^\s]*)\s+\S+\s+\S+\s+\S+\s+(\d+)\s+(.{3}\s+\d{1,2}\s+(?:\d{4}|\d{1,2}:\d{2}))\s+(.+)$/);if(!m)return[];return[{name:m[4].replace(/\s+->.*$/,''),kind:m[1].startsWith('d')?'directory':m[1].startsWith('l')?'symlink':'file',size:Number(m[2]),modified:m[3],mode:m[1]}as Entry];}).filter(entry=>entry.name!=='.'&&entry.name!=='..');return{path:pwd?.replace('Remote working directory:','').trim()||fallback,entries};}
 async function remoteList(target:string,path?:string):Promise<Listing>{const commands=[];if(path)commands.push(`cd ${quote(path,'Remote path')}`);commands.push('ls -lan','pwd');return parseListing(await runSftp(target,commands),path||'~');}
 async function remoteMutation(target:string,command:string){await runSftp(target,[command]);} async function upload(target:string,localPath:string,remoteDir:string,kind:Kind){await runSftp(target,[`put${kind==='directory'?' -r':''} ${quoteLocal(localPath,'Local path')} ${quote(remoteDir,'Remote path')}`],'upload');} async function download(target:string,remotePath:string,localDir:string,kind:Kind){await runSftp(target,[`get${kind==='directory'?' -r':''} ${quote(remotePath,'Remote path')} ${quoteLocal(localDir,'Local path')}`],'download');}
 const THUMB_EXTENSIONS = new Set(['jpg','jpeg','png','gif','webp','bmp','ico']);

@@ -12,6 +12,41 @@ const MIN_VIEW_SCALE = 0.5;
 const MAX_VIEW_SCALE = 2.5;
 function clampViewScale(value: number): number { return Math.min(MAX_VIEW_SCALE, Math.max(MIN_VIEW_SCALE, value)); }
 
+/** Document glyph with a link badge — used wherever a symlink needs to look distinct from a plain file. */
+function SymlinkIcon({ className = 'w-4 h-4', style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <span className={`relative inline-flex flex-shrink-0 ${className}`} style={style} title="Symbolic link" aria-label="Symbolic link">
+      <svg className="w-full h-full text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      </svg>
+      <svg className="absolute -right-0.5 -bottom-0.5 w-[55%] h-[55%] text-cyan-400 drop-shadow-[0_0_1px_rgba(15,23,42,1)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
+      </svg>
+    </span>
+  );
+}
+
+function remoteBreadcrumbTargets(path: string): { label: string; path: string }[] {
+  const absolute = path.startsWith('/');
+  const parts = path.split('/').filter(Boolean);
+  return parts.map((label, index) => ({
+    label,
+    path: `${absolute ? '/' : ''}${parts.slice(0, index + 1).join('/')}`,
+  }));
+}
+
+function localBreadcrumbTargets(path: string): { label: string; path: string }[] {
+  const trimmed = path.replace(/[\\/]+$/, '') || path;
+  const parts = trimmed.split(/[\\/]/).filter(Boolean);
+  return parts.map((label, index) => {
+    if (/^[A-Za-z]:$/.test(parts[0])) {
+      if (index === 0) return { label, path: `${label}\\` };
+      return { label, path: `${parts[0]}\\${parts.slice(1, index + 1).join('\\')}` };
+    }
+    return { label, path: `/${parts.slice(0, index + 1).join('/')}` };
+  });
+}
+
 // React registers wheel listeners as passive, so preventDefault() must come from a native listener.
 function useCtrlWheelZoom(scale: number, onChange: (next: number) => void, enabled = true) {
   const ref = useRef<HTMLDivElement>(null);
@@ -224,6 +259,8 @@ function FileRowLocal({ entry, selected, onSelect, onNavigate, showHidden, viewM
     <svg className="w-4 h-4 text-blue-400/80 group-hover:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
   ) : entry.kind === 'directory' ? (
     <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+  ) : entry.kind === 'symlink' ? (
+    <SymlinkIcon />
   ) : entry.name.endsWith('.json') || entry.name.includes('config') ? (
     <svg className="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
   ) : entry.name.endsWith('.pub') || entry.name.includes('ed25519') || entry.name.includes('rsa') ? (
@@ -246,7 +283,7 @@ function FileRowLocal({ entry, selected, onSelect, onNavigate, showHidden, viewM
         <span className={`text-slate-200 group-hover:text-blue-300 font-sans truncate ${isSelected ? 'text-blue-200 font-medium' : ''}`}>{entry.name}</span>
       </div>
       <div className="col-span-2 text-right text-slate-500 text-[11px]">
-        {entry.kind === 'directory' || entry.name === '..' ? 'Folder' : (entry as any).size ? `${(entry as any).size} B` : '—'}
+        {entry.kind === 'directory' || entry.name === '..' ? 'Folder' : entry.kind === 'symlink' ? 'Link' : entry.size ? `${entry.size} B` : '—'}
       </div>
       <div className="col-span-4 text-right text-slate-400 text-[11px]">
         {entry.modified ? new Date(entry.modified).toLocaleString() : (entry.name === '..' ? 'Parent Directory' : '')}
@@ -276,6 +313,8 @@ function FileRowRemote({ entry, selected, onSelect, onNavigate, showHidden, view
     <svg className="w-4 h-4 text-emerald-400/80 group-hover:text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
   ) : entry.kind === 'directory' ? (
     <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+  ) : entry.kind === 'symlink' ? (
+    <SymlinkIcon />
   ) : entry.name === 'Dockerfile' ? (
     <svg className="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
   ) : entry.name.endsWith('.yml') || entry.name.endsWith('.yaml') ? (
@@ -290,7 +329,10 @@ function FileRowRemote({ entry, selected, onSelect, onNavigate, showHidden, view
     <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
   );
 
-  const perms = (entry as any).perms || 'rw-r--r--';
+  const perms = entry.mode
+    || (entry.kind === 'symlink' ? 'lrwxrwxrwx'
+      : entry.kind === 'directory' || entry.name === '..' ? 'drwxr-xr-x'
+      : 'rw-r--r--');
 
   return (
     <div className={`grid grid-cols-12 px-3 py-1.5 items-center hover:bg-app-rowHover cursor-pointer group ${isSelected ? 'bg-blue-900/30 border-l-2 border-blue-500 hover:bg-blue-900/40' : ''} ${entry.name.startsWith('.') ? 'bg-slate-900/40' : ''}`} onClick={handleClick} onDoubleClick={handleDoubleClick}>
@@ -306,10 +348,10 @@ function FileRowRemote({ entry, selected, onSelect, onNavigate, showHidden, view
         <span className={`text-slate-200 group-hover:text-emerald-300 font-sans truncate ${isSelected ? 'text-blue-200 font-medium' : ''}`}>{entry.name}</span>
       </div>
       <div className="col-span-2 text-right text-slate-500 text-[11px]">
-        {entry.kind === 'directory' || entry.name === '..' ? 'Folder' : (entry as any).size ? `${(entry as any).size} B` : '—'}
+        {entry.kind === 'directory' || entry.name === '..' ? 'Folder' : entry.kind === 'symlink' ? 'Link' : entry.size ? `${entry.size} B` : '—'}
       </div>
       <div className="col-span-2 text-center text-slate-400 text-[11px]">
-        {entry.kind === 'directory' || entry.name === '..' ? (perms.startsWith('drwx') ? 'drwxr-xr-x' : 'drwxrwxr-x') : (perms.startsWith('rw-r') ? 'rw-r--r--' : perms)}
+        {perms}
       </div>
       <div className="col-span-3 text-right text-slate-400 text-[11px]">
         {entry.modified ? new Date(entry.modified).toLocaleString() : (entry.name === '..' ? 'Parent Directory' : '')}
@@ -318,12 +360,13 @@ function FileRowRemote({ entry, selected, onSelect, onNavigate, showHidden, view
   );
 }
 
-function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp, viewMode, viewScale, onViewScaleChange }: {
+function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange }: {
   listing: Listing | null;
   selected: FileEntry[];
   showHidden: boolean;
   onSelect: (entries: FileEntry[]) => void;
   onNavigate: (e: FileEntry) => void;
+  onNavigatePath: (path: string) => void;
   onUp: () => void;
   viewMode: ListingViewMode;
   viewScale: number;
@@ -386,14 +429,16 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
           </span>
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
-            {listing?.path.split(/[\\/]/).filter(p => p).map((part, index) => {
-              return (
-                <React.Fragment key={index}>
-                  {index > 0 && <span className="text-slate-600">/</span>}
-                  <span>{part}</span>
-                </React.Fragment>
-              );
-            })}
+            {listing && localBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
+              <React.Fragment key={crumb.path}>
+                {index > 0 && <span className="text-slate-600">/</span>}
+                {index < crumbs.length - 1 ? (
+                  <button type="button" className="hover:text-blue-300 hover:underline truncate max-w-[7rem]" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
+                ) : (
+                  <span className="text-slate-200 truncate max-w-[7rem]" title={crumb.path}>{crumb.label}</span>
+                )}
+              </React.Fragment>
+            ))}
           </div>
         </div>
         <div className="flex items-center space-x-2 flex-shrink-0">
@@ -434,7 +479,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
               {e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
-                <svg className="text-cyan-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+                <SymlinkIcon className="mb-1" style={{ width: iconEdge, height: iconEdge }} />
               ) : (
                 <svg className="text-slate-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
               )}
@@ -458,7 +503,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
               ) : e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
-                <svg className="text-cyan-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+                <SymlinkIcon className="mb-1" style={{ width: thumbEdge, height: thumbEdge }} />
               ) : (
                 <svg className="text-slate-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
               )}
@@ -471,12 +516,13 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
   );
 }
 
-function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp, viewMode, viewScale, onViewScaleChange, target }: {
+function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange, target }: {
   listing: Listing | null;
   selected: FileEntry[];
   showHidden: boolean;
   onSelect: (entries: FileEntry[]) => void;
   onNavigate: (e: FileEntry) => void;
+  onNavigatePath: (path: string) => void;
   onUp: () => void;
   viewMode: ListingViewMode;
   viewScale: number;
@@ -540,14 +586,16 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
           </span>
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
-            {listing?.path.split('/').filter(p => p).map((part, index) => {
-              return (
-                <React.Fragment key={index}>
-                  {index > 0 && <span className="text-slate-600">/</span>}
-                  <span>{part}</span>
-                </React.Fragment>
-              );
-            })}
+            {listing && remoteBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
+              <React.Fragment key={crumb.path}>
+                {index > 0 && <span className="text-slate-600">/</span>}
+                {index < crumbs.length - 1 ? (
+                  <button type="button" className="hover:text-emerald-300 hover:underline truncate max-w-[7rem]" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
+                ) : (
+                  <span className="text-slate-200 truncate max-w-[7rem]" title={crumb.path}>{crumb.label}</span>
+                )}
+              </React.Fragment>
+            ))}
           </div>
         </div>
         <div className="flex items-center space-x-2 flex-shrink-0">
@@ -589,7 +637,7 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
               {e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
-                <svg className="text-cyan-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+                <SymlinkIcon className="mb-1" style={{ width: iconEdge, height: iconEdge }} />
               ) : (
                 <svg className="text-slate-400 mb-1" style={{ width: iconEdge, height: iconEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
               )}
@@ -613,7 +661,7 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
               ) : e.kind === 'directory' ? (
                 <svg className="text-amber-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
               ) : e.kind === 'symlink' ? (
-                <svg className="text-cyan-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+                <SymlinkIcon className="mb-1" style={{ width: thumbEdge, height: thumbEdge }} />
               ) : (
                 <svg className="text-slate-400 mb-1" style={{ width: thumbEdge, height: thumbEdge }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
               )}
@@ -761,6 +809,25 @@ function App() {
     if (!remote || !target) return;
     try {
       setRemote(await window.sftp.listRemote(target, remoteParent(remote.path)));
+      setRemoteSelected([]);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function localGo(path: string) {
+    try {
+      setLocal(await window.sftp.listLocal(path));
+      setLocalSelected([]);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function remoteGo(path: string) {
+    if (!target) return;
+    try {
+      setRemote(await window.sftp.listRemote(target, path));
       setRemoteSelected([]);
     } catch (e) {
       fail(e);
@@ -992,7 +1059,7 @@ function App() {
 
         {/* Dual Panel Explorer Area */}
         <main className="flex-1 flex min-h-0 overflow-hidden p-3 gap-2" data-purpose="two-panel-explorer">
-          <PanelLocal listing={local} selected={localSelected} showHidden={showHidden} onSelect={setLocalSelected} onNavigate={e => void localNav(e)} onUp={() => void localUp()} viewMode={localViewMode} viewScale={localViewScale} onViewScaleChange={setLocalViewScale} />
+          <PanelLocal listing={local} selected={localSelected} showHidden={showHidden} onSelect={setLocalSelected} onNavigate={e => void localNav(e)} onNavigatePath={path => void localGo(path)} onUp={() => void localUp()} viewMode={localViewMode} viewScale={localViewScale} onViewScaleChange={setLocalViewScale} />
 
           <div className="flex flex-col justify-center items-center space-y-2 px-1 flex-shrink-0" data-purpose="center-transfer-arrows">
             <button className="p-2.5 rounded-lg bg-app-card hover:bg-blue-600 text-slate-300 hover:text-white border border-app-border hover:border-blue-500 shadow-md transition-all active:scale-95 group" title="Upload selection to remote server" onClick={() => void transfer('upload')} disabled={!localSelected.length || !remote || busy || !!progress}>
@@ -1003,7 +1070,7 @@ function App() {
             </button>
           </div>
 
-          <PanelRemote listing={remote} selected={remoteSelected} showHidden={showHidden} onSelect={setRemoteSelected} onNavigate={e => void remoteNav(e)} onUp={() => void remoteUp()} viewMode={remoteViewMode} viewScale={remoteViewScale} onViewScaleChange={setRemoteViewScale} target={target} />
+          <PanelRemote listing={remote} selected={remoteSelected} showHidden={showHidden} onSelect={setRemoteSelected} onNavigate={e => void remoteNav(e)} onNavigatePath={path => void remoteGo(path)} onUp={() => void remoteUp()} viewMode={remoteViewMode} viewScale={remoteViewScale} onViewScaleChange={setRemoteViewScale} target={target} />
         </main>
 
         {/* Log Drawer and Status Bar */}
