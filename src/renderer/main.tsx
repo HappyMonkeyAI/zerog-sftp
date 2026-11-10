@@ -386,12 +386,11 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onUp,
           </span>
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
-            {listing?.path.split(/[\\/]/).filter(p => p).map((part, index, arr) => {
-              const pathSoFar = arr.slice(0, index + 1).join('/');
+            {listing?.path.split(/[\\/]/).filter(p => p).map((part, index) => {
               return (
                 <React.Fragment key={index}>
                   {index > 0 && <span className="text-slate-600">/</span>}
-                  <button className="hover:text-blue-400" onClick={() => { /* navigate to path */ }}>{part}</button>
+                  <span>{part}</span>
                 </React.Fragment>
               );
             })}
@@ -542,18 +541,17 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onUp
           </span>
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
-            {listing?.path.split('/').filter(p => p).map((part, index, arr) => {
+            {listing?.path.split('/').filter(p => p).map((part, index) => {
               return (
                 <React.Fragment key={index}>
                   {index > 0 && <span className="text-slate-600">/</span>}
-                  <button className="hover:text-blue-400">{part === 'home/stephen/zero-g-core' ? 'stephen' : part === 'zero-g-core' ? 'zero-g-core' : part === '/' ? '/' : part}</button>
+                  <span>{part}</span>
                 </React.Fragment>
               );
             })}
           </div>
         </div>
         <div className="flex items-center space-x-2 flex-shrink-0">
-          <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/70 border border-emerald-800/60 px-1.5 py-0.5 rounded">Ubuntu 22.04 LTS</span>
           <button className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors" title="Go up to parent folder" onClick={onUp} disabled={!canGoUp}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
           </button>
