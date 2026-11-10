@@ -48,7 +48,7 @@ function sftpEnv():Record<string,string>{
   return env;
 }
 function stripAnsi(text:string):string{
-  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1b\][^\x07\x1b]*[\x07\x1b]/g,'').replace(/\x1b./g,'');
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g,'').replace(/\x1b./g,'');
 }
 function sftpFailureMessage(out:string,exitCode:number):string{
   const lines=stripAnsi(out).replace(/\r/g,'\n').split('\n').map(line=>line.trim()).filter(Boolean);
