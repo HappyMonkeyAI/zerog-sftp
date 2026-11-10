@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld('sftp', {
   remove: (target, path, kind) => ipcRenderer.invoke('remote:remove', target, path, kind),
   upload: (target, localPath, remoteDir, kind) => ipcRenderer.invoke('remote:upload', target, localPath, remoteDir, kind),
   download: (target, remotePath, localDir, kind) => ipcRenderer.invoke('remote:download', target, remotePath, localDir, kind),
+  downloadThumbnail: (target, remotePath, cacheDir) => ipcRenderer.invoke('sftp:downloadThumbnail', target, remotePath, cacheDir),
+  localThumbnail: (localPath) => ipcRenderer.invoke('local:thumbnail', localPath),
 });

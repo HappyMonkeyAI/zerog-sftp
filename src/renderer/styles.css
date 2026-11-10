@@ -1,2 +1,27 @@
-:root{font-family:Segoe UI,system-ui,sans-serif;color:#e8edf5;background:#111827}*{box-sizing:border-box}body{margin:0}main{height:100vh;display:flex;flex-direction:column;padding:22px 28px;gap:14px}.topbar{display:flex;justify-content:space-between;align-items:end;gap:24px}h1{margin:0;font-size:25px;letter-spacing:.02em}p{margin:4px 0 0;color:#8f9caf}.connect{display:flex;gap:8px;align-items:center}select,input,button{font:inherit;border:1px solid #334155;border-radius:6px;padding:9px 11px;background:#1f2937;color:#e8edf5}input{width:230px}button{cursor:pointer;background:#2563eb;border-color:#3b82f6}button:disabled{opacity:.55;cursor:default}.toolbar{display:flex;gap:8px;flex-wrap:wrap}.toolbar button{background:#334155;border-color:#475569}.progress-label{padding:9px 4px;color:#93c5fd;font-size:13px}.notice{min-height:24px;color:#aab7c8}.error{color:#fca5a5}.panes{display:grid;grid-template-columns:1fr 1fr;gap:14px;min-height:0;flex:1}.panel{min-height:0;border:1px solid #334155;border-radius:8px;background:#182231;display:flex;flex-direction:column;overflow:hidden}.panel header{display:flex;justify-content:space-between;gap:10px;padding:13px 15px;border-bottom:1px solid #334155;background:#202d3e}.panel header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9eacbd;font-size:13px}.entries{overflow:auto;padding:6px}.entry-heading{display:grid;grid-template-columns:1fr 150px;padding:0 11px 6px;gap:8px}.entry-heading button{padding:6px 0;text-align:left;background:transparent;border:0;border-bottom:1px solid #334155;border-radius:0;color:#9eacbd;font-size:12px}.entry-heading button:hover{color:#e8edf5}.entry{display:grid;grid-template-columns:22px 1fr 150px;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid #253244;border-radius:0;color:#e8edf5}.entry:hover,.entry.selected{background:#26364b}.entry small{color:#8f9caf}.kind{color:#67a8ff}footer{font-size:12px;color:#718096}.prompt-backdrop{position:fixed;inset:0;background:#0009;display:grid;place-items:center}.prompt{width:min(560px,calc(100vw - 40px));padding:22px;border:1px solid #475569;border-radius:10px;background:#182231;box-shadow:0 20px 70px #0008}.prompt h2{margin-top:0}.prompt pre{max-height:180px;overflow:auto;white-space:pre-wrap;color:#cbd5e1;font-size:12px}.prompt div{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.prompt input{width:100%}
-@media(max-width:900px){.topbar{align-items:stretch;flex-direction:column}.connect{flex-wrap:wrap}.panes{grid-template-columns:1fr}.panel{min-height:250px}}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom sleek dark scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1424;
+}
+::-webkit-scrollbar-thumb {
+  background: #233352;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6;
+}
+
+/* Subtle glow and utility styles */
+.glow-accent {
+  box-shadow: 0 0 15px -3px rgba(59, 130, 246, 0.35);
+}
+.panel-inner-shadow {
+  box-shadow: inset 0 2px 6px 0 rgba(0, 0, 0, 0.45);
+}
