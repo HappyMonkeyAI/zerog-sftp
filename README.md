@@ -32,3 +32,9 @@ npm run dist:portable
 
 The current host can produce the unpacked and portable artifacts, but `node-pty` requires an Electron-native rebuild for the packaged app. The package configuration currently disables electron-builder’s automatic rebuild because this host is missing Visual Studio Spectre-mitigated libraries (`MSB8040`). Treat the generated artifacts as structural packaging evidence only until `node-pty` is rebuilt and a packaged transfer is exercised.
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Copyright (c) 2026 Stephen Phillips and HappyMonkeyAI.
+
