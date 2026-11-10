@@ -21,8 +21,9 @@ function quote(path:unknown,label:string):string{return `"${safePath(path,label)
 async function profiles():Promise<SshProfile[]>{try{return parseSshConfig(await readFile(join(homedir(),'.ssh','config'),'utf8'));}catch{return[];}}
 async function localList(path?:string):Promise<Listing>{const directory=path||homedir();const names=await readdir(directory,{withFileTypes:true});const entries=await Promise.all(names.map(async item=>{const full=join(directory,item.name);const stat=await import('node:fs/promises').then(fs=>fs.stat(full));return{name:item.name,kind:item.isDirectory()?'directory':item.isSymbolicLink()?'symlink':'file',size:stat.size,modified:stat.mtime.toISOString()}as Entry;}));return{path:directory,entries:entries.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory')||a.name.localeCompare(b.name,undefined,{sensitivity:'base'}))};}
 function sftpExecutable():string { if(process.platform!=='win32')return 'sftp'; const candidates=[join(process.env.SystemRoot??'C:\\Windows','System32','OpenSSH','sftp.exe'),join(process.env.ProgramFiles??'C:\\Program Files','OpenSSH','sftp.exe')]; return candidates.find(existsSync)||'sftp.exe'; }
-// Only pass what OpenSSH needs. Forwarding process.env would leak shell/CI secrets into the PTY child.
-const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','lang','lc_all','lc_ctype']);
+// Only pass what OpenSSH/Windows need. Forwarding process.env would leak shell/CI secrets into the PTY child.
+// PROGRAMDATA is required on Windows OpenSSH; without it the child exits with only PTY mode noise.
+const SFTP_ENV_ALLOW = new Set(['path','pathext','home','userprofile','homedrive','homepath','username','user','logname','ssh_auth_sock','ssh_agent_pid','term','systemroot','windir','systemdrive','comspec','os','temp','tmp','appdata','localappdata','programdata','lang','lc_all','lc_ctype']);
 function sftpEnv():Record<string,string>{
   const env:Record<string,string>={};
   for(const [key,value] of Object.entries(process.env)){
@@ -30,6 +31,13 @@ function sftpEnv():Record<string,string>{
   }
   if(!Object.keys(env).some(key=>key.toLowerCase()==='term'))env.TERM='xterm-256color';
   return env;
+}
+function stripAnsi(text:string):string{
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1b\][^\x07\x1b]*[\x07\x1b]/g,'').replace(/\x1b./g,'');
+}
+function sftpFailureMessage(out:string,exitCode:number):string{
+  const lines=stripAnsi(out).replace(/\r/g,'\n').split('\n').map(line=>line.trim()).filter(Boolean);
+  return lines.at(-1)||`sftp exited with code ${exitCode}`;
 }
 function runSftp(target:string,commands:string[],operation='',scope=''):Promise<string>{
   const destination=validateTarget(target);
@@ -66,7 +74,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
       if(activePty===child){activePty=undefined;activeOperation='';activePromptKind=undefined;}
       mainWindow?.webContents.send('sftp:progress',null);
       if(exitCode===0)finish(resolve,out);
-      else finish(reject,new Error(out.trim().split('\n').filter(Boolean).slice(-1)[0]||`sftp exited with code ${exitCode}`));
+      else finish(reject,new Error(sftpFailureMessage(out,exitCode)));
     });
     timeout=setTimeout(()=>{
       if(activePty===child){child.kill();activePty=undefined;}
