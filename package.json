@@ -27,11 +27,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SPhillips1337/zerog-sftp.git"
+    "url": "git+https://github.com/HappyMonkeyAI/zerog-sftp.git"
   },
-  "homepage": "https://github.com/SPhillips1337/zerog-sftp#readme",
+  "homepage": "https://github.com/HappyMonkeyAI/zerog-sftp#readme",
   "bugs": {
-    "url": "https://github.com/SPhillips1337/zerog-sftp/issues"
+    "url": "https://github.com/HappyMonkeyAI/zerog-sftp/issues"
   },
   "build": {
     "appId": "com.happymonkeyai.zerogsftp",
