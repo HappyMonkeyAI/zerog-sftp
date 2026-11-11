@@ -10,7 +10,7 @@ Please include the affected version or commit, a description of the issue, and
 steps to reproduce if you can. You can expect an initial response within a few
 days.
 
-[advisories]: https://github.com/SPhillips1337/zerog-sftp/security/advisories/new
+[advisories]: https://github.com/HappyMonkeyAI/zerog-sftp/security/advisories/new
 
 ## Supported versions
 
