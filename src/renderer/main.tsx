@@ -913,8 +913,8 @@ function App() {
   return (
     <div className="bg-app-base text-slate-200 font-sans antialiased h-screen flex flex-col overflow-hidden">
       {/* Window Title Bar */}
-      <header className="h-9 bg-[#080b12] border-b border-app-border/80 flex items-center justify-between px-3 select-none flex-shrink-0 z-40" data-purpose="desktop-titlebar">
-        <div className="flex items-center space-x-3">
+      <header className="h-9 bg-[#080b12] border-b border-app-border/80 flex items-center px-3 pr-36 select-none flex-shrink-0 z-40 app-drag" data-purpose="desktop-titlebar">
+        <div className="flex items-center space-x-3 min-w-0">
           <div className="flex items-center space-x-2">
             <svg className="w-4 h-4 text-blue-500 fill-current" viewBox="0 0 24 24">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path>
@@ -922,23 +922,12 @@ function App() {
             <span className="text-xs font-semibold tracking-wider text-slate-100">ZeroG <span className="text-blue-400 font-normal">SFTP</span></span>
           </div>
           <div className="h-3 w-[1px] bg-slate-700/60"></div>
-          <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-400 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>{target ? `Connected: ${target}` : 'Not Connected'}</span>
-            <span className="text-emerald-600 font-sans">|</span>
-            <span className="text-slate-400">{busy ? 'Connecting...' : 'Ready'}</span>
+          <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-[11px] text-emerald-400 font-mono truncate">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
+            <span className="truncate">{target ? `Connected: ${target}` : 'Not Connected'}</span>
+            <span className="text-emerald-600 font-sans flex-shrink-0">|</span>
+            <span className="text-slate-400 flex-shrink-0">{busy ? 'Connecting...' : 'Ready'}</span>
           </div>
-        </div>
-        <div className="flex items-center -mr-3 text-slate-400 h-full">
-          <button className="h-full px-3.5 hover:bg-slate-800/80 transition-colors flex items-center justify-center" title="Minimize">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 12H4" strokeLinecap="round" strokeWidth="2"></path></svg>
-          </button>
-          <button className="h-full px-3.5 hover:bg-slate-800/80 transition-colors flex items-center justify-center" title="Maximize / Restore">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4h16v16H4z" strokeLinecap="round" strokeWidth="2"></path></svg>
-          </button>
-          <button className="h-full px-4 hover:bg-rose-600 hover:text-white transition-colors flex items-center justify-center" title="Close" onClick={() => window.close()}>
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeWidth="2"></path></svg>
-          </button>
         </div>
       </header>
 

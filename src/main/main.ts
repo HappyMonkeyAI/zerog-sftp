@@ -146,7 +146,17 @@ async function downloadThumbnail(target:string,remotePath:string,cacheDir:string
 }
 function createWindow(){// Disable Electron's default File/Edit/View/etc. menu.
     Menu.setApplicationMenu(null);
-    mainWindow=new BrowserWindow({width:1220,height:760,minWidth:900,minHeight:560,webPreferences:{preload:join(root,'dist','main','preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});void mainWindow.loadFile(join(root,'dist','renderer','index.html'));}
+    // Hide the native caption so the in-app header is the only title bar; Windows
+    // still draws min/max/close via titleBarOverlay (avoids a double chrome stack).
+    mainWindow=new BrowserWindow({
+      width:1220,height:760,minWidth:900,minHeight:560,
+      backgroundColor:'#080b12',
+      titleBarStyle:'hidden',
+      titleBarOverlay:{color:'#080b12',symbolColor:'#94a3b8',height:36},
+      webPreferences:{preload:join(root,'dist','main','preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true},
+    });
+    void mainWindow.loadFile(join(root,'dist','renderer','index.html'));
+}
 ipcMain.handle('profiles:list',profiles);ipcMain.handle('local:list',(_e,path?:unknown)=>localList(typeof path==='string'?path:undefined));ipcMain.handle('remote:list',(_e,target:unknown,path?:unknown)=>remoteList(validateTarget(target),typeof path==='string'?path:undefined));ipcMain.handle('sftp:answer',(_e,answer:unknown)=>{if(typeof answer!=='string'||!activePty)throw new Error('No SFTP prompt is waiting.');activePty.write(answer.replace(/[\r\n]/g,'')+'\r');activePty.__promptKind=undefined;activePromptKind=undefined;});ipcMain.handle('sftp:cancel',()=>{if(!activePty)return false;activePty.kill();return true;});ipcMain.handle('remote:mkdir',(_e,target:unknown,path:unknown)=>remoteMutation(validateTarget(target),`mkdir ${quote(path,'Remote path')}`));ipcMain.handle('remote:rename',(_e,target:unknown,from:unknown,to:unknown)=>remoteMutation(validateTarget(target),`rename ${quote(from,'Remote path')} ${quote(to,'Remote path')}`));
 ipcMain.handle('remote:remove',(_e,target:unknown,path:unknown,kind:unknown)=>remoteMutation(validateTarget(target),`${kind==='directory'?'rmdir':'rm'} ${quote(path,'Remote path')}`));ipcMain.handle('remote:upload',(_e,target:unknown,localPath:unknown,remoteDir:unknown,kind:unknown)=>upload(validateTarget(target),safeLocalPath(localPath,'Local path'),safePath(remoteDir,'Remote path'),kind==='directory'?'directory':'file'));ipcMain.handle('remote:download',(_e,target:unknown,remotePath:unknown,localDir:unknown,kind:unknown)=>download(validateTarget(target),safePath(remotePath,'Remote path'),safeLocalPath(localDir,'Local path'),kind==='directory'?'directory':'file'));ipcMain.handle('sftp:downloadThumbnail',(_e,target:unknown,remotePath:unknown,cacheDir:unknown,scope:unknown)=>downloadThumbnail(validateTarget(target),typeof remotePath==='string'?remotePath:'',typeof cacheDir==='string'?cacheDir:'',typeof scope==='string'?scope:''));ipcMain.handle('sftp:cancelThumbnails',(_e,scope:unknown)=>{if(typeof scope!=='string'||!scope||scope.length>4096)return false;const tracked=thumbSessions.get(scope);if(!tracked||tracked.size===0)return false;for(const child of tracked){try{child.kill();}catch{/* already gone */}}tracked.clear();return true;});ipcMain.handle('local:thumbnail',(_e,localPath:unknown)=>localThumbnail(typeof localPath==='string'?localPath:''));
 app.whenReady().then(createWindow);app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});
