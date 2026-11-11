@@ -47,6 +47,69 @@ function localBreadcrumbTargets(path: string): { label: string; path: string }[]
   });
 }
 
+function isWindowsDriveLabel(label: string): boolean {
+  return /^[A-Za-z]:$/.test(label);
+}
+
+function LocalDriveMenu({ currentRoot, onSelect }: { currentRoot: string; onSelect: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [drives, setDrives] = useState<string[]>([]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const normalizedCurrent = currentRoot.replace(/[\\/]+$/, '').toUpperCase() + '\\';
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void window.sftp.listDrives()
+      .then(list => { if (!cancelled) setDrives(list); })
+      .catch(() => { if (!cancelled) setDrives([]); });
+    const onDoc = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative inline-flex" ref={rootRef}>
+      <button
+        type="button"
+        className="p-0.5 rounded text-slate-500 hover:text-blue-300 hover:bg-slate-800/80 transition-colors"
+        title="Change drive"
+        aria-label="Change drive"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /></svg>
+      </button>
+      {open && (
+        <ul className="absolute left-0 top-full mt-1 z-50 min-w-[4.5rem] max-h-56 overflow-y-auto rounded-md border border-app-border bg-app-card shadow-xl py-1" role="listbox">
+          {drives.length === 0 ? (
+            <li className="px-3 py-1.5 text-[11px] text-slate-500">No drives</li>
+          ) : drives.map(drive => {
+            const active = drive.replace(/[\\/]+$/, '').toUpperCase() + '\\' === normalizedCurrent;
+            return (
+              <li key={drive} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  className={`w-full text-left px-3 py-1 text-[11px] font-mono transition-colors ${active ? 'bg-blue-900/40 text-blue-200' : 'text-slate-300 hover:bg-slate-800 hover:text-blue-200'}`}
+                  onClick={() => { onSelect(drive); setOpen(false); }}
+                >
+                  {drive.replace(/\\$/, '')}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // React registers wheel listeners as passive, so preventDefault() must come from a native listener.
 function useCtrlWheelZoom(scale: number, onChange: (next: number) => void, enabled = true) {
   const ref = useRef<HTMLDivElement>(null);
@@ -432,7 +495,16 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNav
             {listing && localBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
               <React.Fragment key={crumb.path}>
                 {index > 0 && <span className="text-slate-600">/</span>}
-                {index < crumbs.length - 1 ? (
+                {index === 0 && isWindowsDriveLabel(crumb.label) ? (
+                  <span className="inline-flex items-center gap-0.5 max-w-[8rem]">
+                    {index < crumbs.length - 1 ? (
+                      <button type="button" className="hover:text-blue-300 hover:underline truncate" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
+                    ) : (
+                      <span className="text-slate-200 truncate" title={crumb.path}>{crumb.label}</span>
+                    )}
+                    <LocalDriveMenu currentRoot={crumb.path} onSelect={onNavigatePath} />
+                  </span>
+                ) : index < crumbs.length - 1 ? (
                   <button type="button" className="hover:text-blue-300 hover:underline truncate max-w-[7rem]" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
                 ) : (
                   <span className="text-slate-200 truncate max-w-[7rem]" title={crumb.path}>{crumb.label}</span>
