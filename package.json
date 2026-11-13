@@ -1,10 +1,28 @@
 {
   "name": "zerog-sftp",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "description": "Standalone SFTP file transfer client for Windows and OpenSSH",
   "type": "module",
   "main": "dist/main/main.js",
+  "bin": {
+    "zerog-sftp": "bin/zerog-sftp.cjs"
+  },
+  "files": [
+    "dist/main",
+    "dist/renderer",
+    "LICENSE",
+    "README.md",
+    "scripts/patch-node-pty.mjs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "electron",
+    "sftp",
+    "ssh",
+    "file-transfer"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-preload.mjs && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -13,13 +31,15 @@
     "icon": "python scripts/generate-icon.py",
     "dist:dir": "npm run build && npm run icon && electron-builder --win dir --x64 --publish never",
     "dist:portable": "npm run build && npm run icon && electron-builder --win portable --x64 --publish never",
-    "ci": "npm run typecheck && npm test && npm run build"
+    "ci": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run build",
+    "postinstall": "node scripts/patch-node-pty.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "node-pty": "^1.1.0",
+    "node-pty": "1.1.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
