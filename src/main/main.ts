@@ -81,7 +81,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
       out+=chunk;
       const clean=chunk.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'');
       const progress=clean.match(/(\d{1,3})%\s+([^\r\n]*)/);
-      if(progress&&operation)mainWindow?.webContents.send('sftp:progress',{operation,percent:Math.min(100,Number(progress[1])),detail:progress[2].trim()});
+      if(progress&&operation&&operation!=='thumbnail')mainWindow?.webContents.send('sftp:progress',{operation,percent:Math.min(100,Number(progress[1])),detail:progress[2].trim()});
       if(!child.__promptKind&&/Are you sure you want to continue connecting/i.test(clean)){
         child.__promptKind='host-key';activePty=child;activePromptKind='host-key';clearTimeout(timeout);
         mainWindow?.webContents.send('sftp:prompt',{kind:'host-key',message:clean.slice(-500)});
@@ -96,7 +96,7 @@ function runSftp(target:string,commands:string[],operation='',scope=''):Promise<
     child.onExit(({exitCode}:{exitCode:number})=>{
       if(child.__thumbScope){const tracked=thumbSessions.get(child.__thumbScope);tracked?.delete(child);if(tracked&&tracked.size===0)thumbSessions.delete(child.__thumbScope);}
       if(activePty===child){activePty=undefined;activeOperation='';activePromptKind=undefined;}
-      mainWindow?.webContents.send('sftp:progress',null);
+      if(operation!=='thumbnail')mainWindow?.webContents.send('sftp:progress',null);
       if(exitCode===0)finish(resolve,out);
       else finish(reject,new Error(sftpFailureMessage(out,exitCode)));
     });
