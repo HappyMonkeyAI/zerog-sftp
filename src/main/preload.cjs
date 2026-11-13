@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('sftp', {
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   listLocal: (path) => ipcRenderer.invoke('local:list', path),
+  listDrives: () => ipcRenderer.invoke('local:drives'),
   listRemote: (target, path) => ipcRenderer.invoke('remote:list', target, path),
   answerPrompt: (answer) => ipcRenderer.invoke('sftp:answer', answer),
   cancel: () => ipcRenderer.invoke('sftp:cancel'),

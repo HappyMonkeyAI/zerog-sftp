@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { FileEntry, Listing, ListingViewMode } from '../shared/types.js';
 import { profileTarget, type SshProfile } from '../shared/ssh.js';
@@ -45,6 +45,69 @@ function localBreadcrumbTargets(path: string): { label: string; path: string }[]
     }
     return { label, path: `/${parts.slice(0, index + 1).join('/')}` };
   });
+}
+
+function isWindowsDriveLabel(label: string): boolean {
+  return /^[A-Za-z]:$/.test(label);
+}
+
+function LocalDriveMenu({ currentRoot, onSelect }: { currentRoot: string; onSelect: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [drives, setDrives] = useState<string[]>([]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const normalizedCurrent = currentRoot.replace(/[\\/]+$/, '').toUpperCase() + '\\';
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void window.sftp.listDrives()
+      .then(list => { if (!cancelled) setDrives(list); })
+      .catch(() => { if (!cancelled) setDrives([]); });
+    const onDoc = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative inline-flex" ref={rootRef}>
+      <button
+        type="button"
+        className="p-0.5 rounded text-slate-500 hover:text-blue-300 hover:bg-slate-800/80 transition-colors"
+        title="Change drive"
+        aria-label="Change drive"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" /></svg>
+      </button>
+      {open && (
+        <ul className="absolute left-0 top-full mt-1 z-50 min-w-[4.5rem] max-h-56 overflow-y-auto rounded-md border border-app-border bg-app-card shadow-xl py-1" role="listbox">
+          {drives.length === 0 ? (
+            <li className="px-3 py-1.5 text-[11px] text-slate-500">No drives</li>
+          ) : drives.map(drive => {
+            const active = drive.replace(/[\\/]+$/, '').toUpperCase() + '\\' === normalizedCurrent;
+            return (
+              <li key={drive} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  className={`w-full text-left px-3 py-1 text-[11px] font-mono transition-colors ${active ? 'bg-blue-900/40 text-blue-200' : 'text-slate-300 hover:bg-slate-800 hover:text-blue-200'}`}
+                  onClick={() => { onSelect(drive); setOpen(false); }}
+                >
+                  {drive.replace(/\\$/, '')}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 // React registers wheel listeners as passive, so preventDefault() must come from a native listener.
@@ -113,7 +176,38 @@ function cancelThumbScope(scope: string): void {
     waiter.resolve(false);
   }
   void window.sftp?.cancelThumbnails?.(scope);
+  if (scope.startsWith('remote:')) resetThumbBatch();
 }
+
+// One steady banner for a directory's remote thumbnails. Per-file SFTP progress
+// used to mount/unmount the banner for every image, shifting the grid up and
+// down; this keeps a single bar visible until the whole batch is processed.
+// Loads are keyed by scope+epoch so a fetch abandoned by navigation can never
+// decrement the next directory's batch.
+let thumbBatchKey = '';
+let thumbBatchPending = 0;
+let thumbBatchDone = 0;
+let thumbBatchSnapshot = { active: false, done: 0, total: 0 };
+const thumbBatchSubs = new Set<() => void>();
+function publishThumbBatch(): void {
+  thumbBatchSnapshot = { active: thumbBatchPending > 0, done: thumbBatchDone, total: thumbBatchDone + thumbBatchPending };
+  thumbBatchSubs.forEach(fn => fn());
+}
+function subscribeThumbBatch(fn: () => void): () => void { thumbBatchSubs.add(fn); return () => { thumbBatchSubs.delete(fn); }; }
+function getThumbBatch() { return thumbBatchSnapshot; }
+function beginThumbBatch(scope: string, epoch: number): void {
+  const key = `${scope}:${epoch}`;
+  if (key !== thumbBatchKey) { thumbBatchKey = key; thumbBatchPending = 0; thumbBatchDone = 0; }
+  thumbBatchPending += 1;
+  publishThumbBatch();
+}
+function endThumbBatch(scope: string, epoch: number): void {
+  if (`${scope}:${epoch}` !== thumbBatchKey) return;
+  thumbBatchPending = Math.max(0, thumbBatchPending - 1);
+  thumbBatchDone += 1;
+  publishThumbBatch();
+}
+function resetThumbBatch(): void { thumbBatchKey = ''; thumbBatchPending = 0; thumbBatchDone = 0; publishThumbBatch(); }
 
 function listingChildPath(base: string, name: string): string {
   if (!base) return name;
@@ -147,6 +241,10 @@ function EntryThumbnail(props: {
     }
     let cancelled = false;
     const epoch = thumbEpoch(scope);
+    // Remote thumbnails share one batch banner; register this file so the bar
+    // stays up until every image in the directory has been processed.
+    const batched = !isLocal;
+    if (batched) beginThumbBatch(scope, epoch);
     const load = async (): Promise<string | null> => {
       if (!(await acquireThumbSlot(scope, epoch))) return null;
       try {
@@ -164,6 +262,7 @@ function EntryThumbnail(props: {
       }
     };
     void load().then((next) => {
+      if (batched) endThumbBatch(scope, epoch);
       // An abandoned fetch reports null because its SFTP session was killed, so
       // never remember that as a permanent failure for this file.
       const abandoned = cancelled || epoch !== thumbEpoch(scope);
@@ -432,7 +531,16 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNav
             {listing && localBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
               <React.Fragment key={crumb.path}>
                 {index > 0 && <span className="text-slate-600">/</span>}
-                {index < crumbs.length - 1 ? (
+                {index === 0 && isWindowsDriveLabel(crumb.label) ? (
+                  <span className="inline-flex items-center gap-0.5 max-w-[8rem]">
+                    {index < crumbs.length - 1 ? (
+                      <button type="button" className="hover:text-blue-300 hover:underline truncate" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
+                    ) : (
+                      <span className="text-slate-200 truncate" title={crumb.path}>{crumb.label}</span>
+                    )}
+                    <LocalDriveMenu currentRoot={crumb.path} onSelect={onNavigatePath} />
+                  </span>
+                ) : index < crumbs.length - 1 ? (
                   <button type="button" className="hover:text-blue-300 hover:underline truncate max-w-[7rem]" title={crumb.path} onClick={() => onNavigatePath(crumb.path)}>{crumb.label}</button>
                 ) : (
                   <span className="text-slate-200 truncate max-w-[7rem]" title={crumb.path}>{crumb.label}</span>
@@ -734,6 +842,7 @@ function App() {
 
   useEffect(() => window.sftp.onPrompt(p => { setAuthPrompt(p); setAnswer(''); }), []);
   useEffect(() => window.sftp.onProgress(setProgress), []);
+  const thumbBatch = useSyncExternalStore(subscribeThumbBatch, getThumbBatch);
 
   const profile = useMemo(() => profiles.find(p => p.alias === selectedProfile), [profiles, selectedProfile]);
   const connectTarget = profile ? profileTarget(profile) : manual.trim();
@@ -1033,6 +1142,26 @@ function App() {
             </button>
           </div>
         </section>
+
+        {/* Thumbnail batch banner: one steady bar until every image is processed. */}
+        {thumbBatch.active && (
+          <div className="bg-blue-950/40 border-b border-blue-900/60 px-4 py-2 flex items-center gap-4 text-xs" data-purpose="thumbnail-batch-progress">
+            <div className="flex items-center space-x-3 min-w-0 flex-1">
+              <div className="p-1 rounded bg-blue-500/20 text-blue-400 animate-spin">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"></path></svg>
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex justify-between items-center text-[11px] mb-1">
+                  <span className="text-slate-200 font-mono truncate">Generating thumbnails…</span>
+                  <span className="text-slate-400 font-mono">{thumbBatch.done} / {thumbBatch.total}</span>
+                </div>
+                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-500 to-cyan-400 h-1.5 rounded-full transition-all duration-300" style={{ width: `${thumbBatch.total ? Math.round((thumbBatch.done / thumbBatch.total) * 100) : 0}%` }}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Live Transfer Banner */}
         {progress && (
