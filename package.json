@@ -1,6 +1,6 @@
 {
   "name": "zerog-sftp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Standalone SFTP file transfer client for Windows and OpenSSH",
   "type": "module",
   "main": "dist/main/main.js",
@@ -10,6 +10,7 @@
   "files": [
     "dist/main",
     "dist/renderer",
+    "dist/shared",
     "LICENSE",
     "README.md",
     "scripts/patch-node-pty.mjs"
@@ -58,8 +59,14 @@
     "productName": "ZeroG SFTP",
     "asar": true,
     "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
     "files": [
-      "dist/**/*",
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "dist/shared/**/*",
       "package.json",
       "build/icon.ico"
     ],
@@ -79,7 +86,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     }
   },
   "devDependencies": {
