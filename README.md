@@ -16,11 +16,15 @@ app and never persisted.
 - **Image thumbnails** for remote files, fetched over SFTP and cached on disk.
 - **Transfers** as a sequential queue with per-item progress, queue position,
   and cancellation. Folders transfer recursively.
+- **Directory favourites**: local and remote paths, with remote entries scoped to
+  the SSH target they were saved from.
 - **Remote file operations**: create directory, rename, delete.
 - **Selection and sorting**: click to select, `Shift`-click for a range, sort by
   name or date with directories grouped together.
 - **Hidden files** are hidden by default; a toolbar toggle reveals them in both
   panes at once.
+- **Update notifications**: notify-only release checks through the official
+  GitHub Releases page.
 
 ## Requirements
 
@@ -55,6 +59,21 @@ Spectre-mitigated libraries (`MSB8040`). Treat the generated artifacts as
 structural packaging output until `node-pty` is rebuilt and a packaged transfer
 has been exercised end to end.
 
+## Updates
+
+A packaged build checks GitHub releases about eight seconds after launch. The
+**Updates** control in the title bar lets you switch startup checks off, check
+manually, and clear a skipped version. When a newer release exists, the prompt
+offers:
+
+- **Open download page**
+- **Later**
+- **Skip this version**
+
+ZeroG SFTP never downloads, installs, or replaces itself. The release link is
+sanitized to the official HTTPS `github.com/HappyMonkeyAI/ZeroG-SFTP` release
+page, and development or npm-installed builds do not check.
+
 ## How it works
 
 - The Electron main process spawns the system `sftp` binary through `node-pty`
@@ -82,6 +101,8 @@ scripts/        Build helpers
   Windows-specific.
 - Transfers run one item at a time. Mutations are not queued.
 - No built-in key management; use `ssh-agent` and your SSH config.
+- Update support is notify-only; automatic installation remains deferred until
+  packaged Windows transfers are validated.
 
 ## Contributing
 

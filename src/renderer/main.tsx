@@ -2,6 +2,12 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { createRoot } from 'react-dom/client';
 import type { FileEntry, Listing, ListingViewMode } from '../shared/types.js';
 import { profileTarget, type SshProfile } from '../shared/ssh.js';
+import { FavouritesControl } from './favourites-control.js';
+import { EMPTY_FAVOURITES, findFavourite, removeFavourite, toggleFavourite, type FavouriteDirectory, type FavouritePlace, type StoredFavouriteFile } from '../shared/favourites.js';
+import { shouldPrompt, type UpdateState } from '../shared/update.js';
+import { UpdateControl } from './update-control.js';
+import { UpdatePrompt } from './update-prompt.js';
+import { loadStoredUpdateSettings, storeUpdateSettings, type UpdateSettings } from './update-settings.js';
 import './styles.css';
 
 const THUMB_EXTENSIONS = new Set(['jpg','jpeg','png','gif','webp','bmp','ico']);
@@ -459,7 +465,7 @@ function FileRowRemote({ entry, selected, onSelect, onNavigate, showHidden, view
   );
 }
 
-function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange }: {
+function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange, favouritesControl }: {
   listing: Listing | null;
   selected: FileEntry[];
   showHidden: boolean;
@@ -470,6 +476,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNav
   viewMode: ListingViewMode;
   viewScale: number;
   onViewScaleChange: (scale: number) => void;
+  favouritesControl: React.ReactNode;
 }) {
   const [sort, setSort] = useState<{ key: 'name' | 'modified'; direction: 1 | -1 }>({ key: 'name', direction: 1 });
   const [anchor, setAnchor] = useState('');
@@ -526,6 +533,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNav
             <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
             Local
           </span>
+          {favouritesControl}
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
             {listing && localBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
@@ -624,7 +632,7 @@ function PanelLocal({ listing, selected, showHidden, onSelect, onNavigate, onNav
   );
 }
 
-function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange, target }: {
+function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onNavigatePath, onUp, viewMode, viewScale, onViewScaleChange, target, favouritesControl }: {
   listing: Listing | null;
   selected: FileEntry[];
   showHidden: boolean;
@@ -636,6 +644,7 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onNa
   viewScale: number;
   onViewScaleChange: (scale: number) => void;
   target: string;
+  favouritesControl: React.ReactNode;
 }) {
   const [sort, setSort] = useState<{ key: 'name' | 'modified'; direction: 1 | -1 }>({ key: 'name', direction: 1 });
   const [anchor, setAnchor] = useState('');
@@ -692,6 +701,7 @@ function PanelRemote({ listing, selected, showHidden, onSelect, onNavigate, onNa
             <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
             Remote
           </span>
+          {favouritesControl}
           <div className="h-3 w-[1px] bg-slate-700"></div>
           <div className="flex items-center space-x-1 text-xs font-mono bg-slate-900/80 px-2 py-1 rounded border border-slate-800/80 text-slate-300 flex-1 max-w-md truncate">
             {listing && remoteBreadcrumbTargets(listing.path).map((crumb, index, crumbs) => (
@@ -831,6 +841,12 @@ function App() {
   const [localViewScale, setLocalViewScale] = useState<number>(1);
   const [remoteViewScale, setRemoteViewScale] = useState<number>(1);
   const [dialog, setDialog] = useState<{ kind: 'rename' | 'remove'; name: string; value: string; kind2: string } | null>(null);
+  const [favourites, setFavourites] = useState<StoredFavouriteFile>(EMPTY_FAVOURITES);
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null);
+  const [updateAsked, setUpdateAsked] = useState(false);
+  const [updateSettings, setUpdateSettings] = useState<UpdateSettings>(() => loadStoredUpdateSettings());
+  const startupCheckDone = useRef(false);
 
   useEffect(() => {
     void window.sftp.listProfiles().then(items => {
@@ -838,16 +854,47 @@ function App() {
       if (items[0]) setSelectedProfile(items[0].alias);
     });
     void window.sftp.listLocal().then(setLocal).catch(e => setError(String((e as Error).message ?? e)));
+    void window.sftp.loadFavourites().then(setFavourites).catch(e => setError(String((e as Error).message ?? e)));
   }, []);
 
   useEffect(() => window.sftp.onPrompt(p => { setAuthPrompt(p); setAnswer(''); }), []);
   useEffect(() => window.sftp.onProgress(setProgress), []);
+  useEffect(() => {
+    void window.sftp.updateState().then(setUpdate).catch(() => undefined);
+    return window.sftp.onUpdateState(setUpdate);
+  }, []);
+  useEffect(() => {
+    if (startupCheckDone.current || !updateSettings.checkOnStartup) return;
+    const timer = window.setTimeout(() => {
+      startupCheckDone.current = true;
+      void window.sftp.checkForUpdates().catch(() => undefined);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [updateSettings.checkOnStartup]);
   const thumbBatch = useSyncExternalStore(subscribeThumbBatch, getThumbBatch);
 
   const profile = useMemo(() => profiles.find(p => p.alias === selectedProfile), [profiles, selectedProfile]);
   const connectTarget = profile ? profileTarget(profile) : manual.trim();
 
   const fail = (e: unknown) => setError(String((e as Error).message ?? e));
+
+  function updateUpdateSettings(patch: Partial<UpdateSettings>) {
+    setUpdateSettings(previous => {
+      const next = { ...previous, ...patch };
+      storeUpdateSettings(next);
+      return next;
+    });
+  }
+
+  function checkForUpdatesNow() {
+    setUpdateAsked(true);
+    void window.sftp.checkForUpdates().catch(e => setError(String((e as Error).message ?? e)));
+  }
+
+  function closeUpdatePrompt() {
+    if (update && update.status === 'available') setDismissedUpdate(update.version);
+    setUpdateAsked(false);
+  }
 
   async function connect() {
     setError('');
@@ -943,6 +990,34 @@ function App() {
     }
   }
 
+  function updateFavourites(next: StoredFavouriteFile) {
+    setFavourites(next);
+    void window.sftp.saveFavourites(next).catch(e => setError(String((e as Error).message ?? e)));
+  }
+
+  function toggleFavouriteAt(place: FavouritePlace, path: string) {
+    const existing = findFavourite(favourites, place, path);
+    const next = toggleFavourite(favourites, place, path, { id: crypto.randomUUID(), now: new Date() });
+    if (next === favourites) return;
+    updateFavourites(next);
+    setStatus(existing ? `Removed ${path} from favourites` : `Added ${path} to favourites`);
+  }
+
+  function removeFavouriteAt(favourite: FavouriteDirectory) {
+    updateFavourites(removeFavourite(favourites, favourite.id));
+    setStatus(`Removed ${favourite.path} from favourites`);
+  }
+
+  async function jumpToFavourite(favourite: FavouriteDirectory) {
+    if (favourite.place === 'local') {
+      await localGo(favourite.path);
+    } else if (favourite.target === target) {
+      await remoteGo(favourite.path);
+    } else {
+      setStatus(`Connect to ${favourite.target} before opening ${favourite.path}`);
+    }
+  }
+
   function remoteAction(action: 'mkdir' | 'rename' | 'remove') {
     if (!target || !remote) return;
     const selected = remoteSelected[0];
@@ -1019,6 +1094,8 @@ function App() {
     }
   }
 
+  const updatePromptOpen = shouldPrompt(update, updateSettings.skippedVersion, dismissedUpdate, updateAsked);
+
   return (
     <div className="bg-app-base text-slate-200 font-sans antialiased h-screen flex flex-col overflow-hidden">
       {/* Window Title Bar */}
@@ -1039,6 +1116,14 @@ function App() {
           </div>
         </div>
         <div className="flex items-center -mr-3 text-slate-400 h-full">
+          <UpdateControl
+            state={update}
+            checkOnStartup={updateSettings.checkOnStartup}
+            skippedVersion={updateSettings.skippedVersion}
+            onStartupChange={checkOnStartup => updateUpdateSettings({ checkOnStartup })}
+            onCheck={checkForUpdatesNow}
+            onClearSkipped={() => updateUpdateSettings({ skippedVersion: '' })}
+          />
           <button className="h-full px-3.5 hover:bg-slate-800/80 transition-colors flex items-center justify-center" title="Minimize">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 12H4" strokeLinecap="round" strokeWidth="2"></path></svg>
           </button>
@@ -1188,7 +1273,30 @@ function App() {
 
         {/* Dual Panel Explorer Area */}
         <main className="flex-1 flex min-h-0 overflow-hidden p-3 gap-2" data-purpose="two-panel-explorer">
-          <PanelLocal listing={local} selected={localSelected} showHidden={showHidden} onSelect={setLocalSelected} onNavigate={e => void localNav(e)} onNavigatePath={path => void localGo(path)} onUp={() => void localUp()} viewMode={localViewMode} viewScale={localViewScale} onViewScaleChange={setLocalViewScale} />
+          <PanelLocal
+            listing={local}
+            selected={localSelected}
+            showHidden={showHidden}
+            onSelect={setLocalSelected}
+            onNavigate={e => void localNav(e)}
+            onNavigatePath={path => void localGo(path)}
+            onUp={() => void localUp()}
+            viewMode={localViewMode}
+            viewScale={localViewScale}
+            onViewScaleChange={setLocalViewScale}
+            favouritesControl={
+              <FavouritesControl
+                place={{ kind: 'local' }}
+                currentPath={local?.path}
+                favourites={favourites}
+                remoteTarget={target}
+                isFavourite={Boolean(local && findFavourite(favourites, { kind: 'local' }, local.path))}
+                onToggle={toggleFavouriteAt}
+                onJump={favourite => void jumpToFavourite(favourite)}
+                onRemove={removeFavouriteAt}
+              />
+            }
+          />
 
           <div className="flex flex-col justify-center items-center space-y-2 px-1 flex-shrink-0" data-purpose="center-transfer-arrows">
             <button className="p-2.5 rounded-lg bg-app-card hover:bg-blue-600 text-slate-300 hover:text-white border border-app-border hover:border-blue-500 shadow-md transition-all active:scale-95 group" title="Upload selection to remote server" onClick={() => void transfer('upload')} disabled={!localSelected.length || !remote || busy || !!progress}>
@@ -1199,7 +1307,31 @@ function App() {
             </button>
           </div>
 
-          <PanelRemote listing={remote} selected={remoteSelected} showHidden={showHidden} onSelect={setRemoteSelected} onNavigate={e => void remoteNav(e)} onNavigatePath={path => void remoteGo(path)} onUp={() => void remoteUp()} viewMode={remoteViewMode} viewScale={remoteViewScale} onViewScaleChange={setRemoteViewScale} target={target} />
+          <PanelRemote
+            listing={remote}
+            selected={remoteSelected}
+            showHidden={showHidden}
+            onSelect={setRemoteSelected}
+            onNavigate={e => void remoteNav(e)}
+            onNavigatePath={path => void remoteGo(path)}
+            onUp={() => void remoteUp()}
+            viewMode={remoteViewMode}
+            viewScale={remoteViewScale}
+            onViewScaleChange={setRemoteViewScale}
+            target={target}
+            favouritesControl={
+              <FavouritesControl
+                place={{ kind: 'remote', target }}
+                currentPath={remote?.path}
+                favourites={favourites}
+                remoteTarget={target}
+                isFavourite={Boolean(remote && target && findFavourite(favourites, { kind: 'remote', target }, remote.path))}
+                onToggle={toggleFavouriteAt}
+                onJump={favourite => void jumpToFavourite(favourite)}
+                onRemove={removeFavouriteAt}
+              />
+            }
+          />
         </main>
 
         {/* Log Drawer and Status Bar */}
@@ -1288,6 +1420,18 @@ function App() {
           </form>
         </div>
       )}
+
+      {updatePromptOpen && update && update.status === 'available' ? (
+        <UpdatePrompt
+          state={update}
+          onOpenRelease={() => void window.sftp.openReleasePage().catch(e => setError(String((e as Error).message ?? e)))}
+          onLater={closeUpdatePrompt}
+          onSkip={() => {
+            updateUpdateSettings({ skippedVersion: update.version });
+            setUpdateAsked(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

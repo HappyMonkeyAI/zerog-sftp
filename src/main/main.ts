@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, net, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { readFile, readdir, mkdir, writeFile, stat, rename as renameFile, rm } from 'node:fs/promises';
@@ -7,12 +7,30 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { parseSshConfig, validateTarget, type SshProfile } from '../shared/ssh.js';
+import { FavouriteStore, defaultFavouritePath } from './favourite-store.js';
+import { LATEST_RELEASE_API, RELEASES_URL, safeReleaseUrl, updateMode } from '../shared/update.js';
+import { UpdateService } from './update-service.js';
 const require=createRequire(import.meta.url); const pty=require('node-pty');
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 let mainWindow: BrowserWindow | undefined; let activePty: any; let activePromptKind: string | undefined; let activeOperation = '';
 // Thumbnail fetches are background work: remembering their scope lets a pane that
 // navigates away kill the SFTP sessions it no longer needs.
 const thumbSessions = new Map<string, Set<any>>();
+const favouriteStore = new FavouriteStore(defaultFavouritePath(app.getPath('userData')));
+const updates = new UpdateService({
+  mode: updateMode(app.isPackaged),
+  currentVersion: app.getVersion(),
+  fetchLatest: async () => {
+    const response = await net.fetch(LATEST_RELEASE_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ZeroG-SFTP-update-check' },
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`GitHub answered ${response.status} to the update check.`);
+    return response.json();
+  },
+  onChange: (state) => mainWindow?.webContents.send('updates:state', state)
+});
 type Kind='file'|'directory'|'symlink'; type Entry={name:string;kind:Kind;size:number;modified?:string;mode?:string}; type Listing={path:string;entries:Entry[]};
 const unsafePath=/[\0\r\n"'\\*?[\]]/;
 function safePath(path:unknown,label:string):string{if(typeof path!=='string'||!path||path.length>4096||unsafePath.test(path))throw new Error(`${label} contains unsupported characters.`);return path;}
@@ -156,6 +174,13 @@ async function downloadThumbnail(target:string,remotePath:string,cacheDir:string
 function createWindow(){// Disable Electron's default File/Edit/View/etc. menu.
     Menu.setApplicationMenu(null);
     mainWindow=new BrowserWindow({width:1220,height:760,minWidth:900,minHeight:560,webPreferences:{preload:join(root,'dist','main','preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});void mainWindow.loadFile(join(root,'dist','renderer','index.html'));}
-ipcMain.handle('profiles:list',profiles);ipcMain.handle('local:list',(_e,path?:unknown)=>localList(typeof path==='string'?path:undefined));ipcMain.handle('local:drives',()=>localDrives());ipcMain.handle('remote:list',(_e,target:unknown,path?:unknown)=>remoteList(validateTarget(target),typeof path==='string'?path:undefined));ipcMain.handle('sftp:answer',(_e,answer:unknown)=>{if(typeof answer!=='string'||!activePty)throw new Error('No SFTP prompt is waiting.');activePty.write(answer.replace(/[\r\n]/g,'')+'\r');activePty.__promptKind=undefined;activePromptKind=undefined;});ipcMain.handle('sftp:cancel',()=>{if(!activePty)return false;activePty.kill();return true;});ipcMain.handle('remote:mkdir',(_e,target:unknown,path:unknown)=>remoteMutation(validateTarget(target),`mkdir ${quote(path,'Remote path')}`));ipcMain.handle('remote:rename',(_e,target:unknown,from:unknown,to:unknown)=>remoteMutation(validateTarget(target),`rename ${quote(from,'Remote path')} ${quote(to,'Remote path')}`));
+ipcMain.handle('profiles:list',profiles);ipcMain.handle('local:list',(_e,path?:unknown)=>localList(typeof path==='string'?path:undefined));ipcMain.handle('local:drives',()=>localDrives());ipcMain.handle('remote:list',(_e,target:unknown,path?:unknown)=>remoteList(validateTarget(target),typeof path==='string'?path:undefined));ipcMain.handle('favourites:load',()=>favouriteStore.load());ipcMain.handle('favourites:save',(_e,file:unknown)=>favouriteStore.save(file));ipcMain.handle('sftp:answer',(_e,answer:unknown)=>{if(typeof answer!=='string'||!activePty)throw new Error('No SFTP prompt is waiting.');activePty.write(answer.replace(/[\r\n]/g,'')+'\r');activePty.__promptKind=undefined;activePromptKind=undefined;});ipcMain.handle('sftp:cancel',()=>{if(!activePty)return false;activePty.kill();return true;});ipcMain.handle('remote:mkdir',(_e,target:unknown,path:unknown)=>remoteMutation(validateTarget(target),`mkdir ${quote(path,'Remote path')}`));ipcMain.handle('remote:rename',(_e,target:unknown,from:unknown,to:unknown)=>remoteMutation(validateTarget(target),`rename ${quote(from,'Remote path')} ${quote(to,'Remote path')}`));
 ipcMain.handle('remote:remove',(_e,target:unknown,path:unknown,kind:unknown)=>remoteMutation(validateTarget(target),`${kind==='directory'?'rmdir':'rm'} ${quote(path,'Remote path')}`));ipcMain.handle('remote:upload',(_e,target:unknown,localPath:unknown,remoteDir:unknown,kind:unknown)=>upload(validateTarget(target),safeLocalPath(localPath,'Local path'),safePath(remoteDir,'Remote path'),kind==='directory'?'directory':'file'));ipcMain.handle('remote:download',(_e,target:unknown,remotePath:unknown,localDir:unknown,kind:unknown)=>download(validateTarget(target),safePath(remotePath,'Remote path'),safeLocalPath(localDir,'Local path'),kind==='directory'?'directory':'file'));ipcMain.handle('sftp:downloadThumbnail',(_e,target:unknown,remotePath:unknown,cacheDir:unknown,scope:unknown)=>downloadThumbnail(validateTarget(target),typeof remotePath==='string'?remotePath:'',typeof cacheDir==='string'?cacheDir:'',typeof scope==='string'?scope:''));ipcMain.handle('sftp:cancelThumbnails',(_e,scope:unknown)=>{if(typeof scope!=='string'||!scope||scope.length>4096)return false;const tracked=thumbSessions.get(scope);if(!tracked||tracked.size===0)return false;for(const child of tracked){try{child.kill();}catch{/* already gone */}}tracked.clear();return true;});ipcMain.handle('local:thumbnail',(_e,localPath:unknown)=>localThumbnail(typeof localPath==='string'?localPath:''));
+ipcMain.handle('updates:state',()=>updates.current());
+ipcMain.handle('updates:check',()=>updates.check());
+ipcMain.handle('updates:openRelease',()=>{
+  const state=updates.current();
+  const url=state.status==='available'?safeReleaseUrl(state.releaseUrl):RELEASES_URL;
+  return shell.openExternal(url);
+});
 app.whenReady().then(createWindow);app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});

@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('sftp', {
   listLocal: (path) => ipcRenderer.invoke('local:list', path),
   listDrives: () => ipcRenderer.invoke('local:drives'),
   listRemote: (target, path) => ipcRenderer.invoke('remote:list', target, path),
+  loadFavourites: () => ipcRenderer.invoke('favourites:load'),
+  saveFavourites: (file) => ipcRenderer.invoke('favourites:save', file),
   answerPrompt: (answer) => ipcRenderer.invoke('sftp:answer', answer),
   cancel: () => ipcRenderer.invoke('sftp:cancel'),
   onPrompt: (callback) => {
@@ -25,4 +27,12 @@ contextBridge.exposeInMainWorld('sftp', {
   downloadThumbnail: (target, remotePath, cacheDir, scope) => ipcRenderer.invoke('sftp:downloadThumbnail', target, remotePath, cacheDir, scope),
   cancelThumbnails: (scope) => ipcRenderer.invoke('sftp:cancelThumbnails', scope),
   localThumbnail: (localPath) => ipcRenderer.invoke('local:thumbnail', localPath),
+  updateState: () => ipcRenderer.invoke('updates:state'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  openReleasePage: () => ipcRenderer.invoke('updates:openRelease'),
+  onUpdateState: (callback) => {
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('updates:state', handler);
+    return () => ipcRenderer.removeListener('updates:state', handler);
+  },
 });
